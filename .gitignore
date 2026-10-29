@@ -1,0 +1,38 @@
+# Local agent instructions
+AGENTS.md
+
+# Build output and intermediate files
+/out/
+/build/
+/bin/
+/bin-int/
+
+# Visual Studio caches and generated Premake projects
+.vs/
+*.sln
+*.slnx
+*.vcxproj*
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+ipch/
+
+# Compiler and linker artifacts
+*.obj
+*.pch
+*.pdb
+*.idb
+*.ilk
+*.tlog
+*.lastbuildstate
+
+# CMake caches from local or dependency builds
+CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+
+# Operating system metadata
+Thumbs.db
+Desktop.ini
+.DS_Store
