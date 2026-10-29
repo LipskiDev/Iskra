@@ -1,8 +1,12 @@
 #pragma once 
 
 #include <nvrhi/nvrhi.h>
-#include "Swapchain.h"
+#include <core/Swapchain.h>
 #include <scene/Scene.h>
+
+#include <memory>
+
+#include <graphics/passes/TrianglePass.h>
 
 namespace Iskra {
 
@@ -14,5 +18,8 @@ namespace Iskra {
 
   private:
     nvrhi::GraphicsPipelineHandle trianglePipeline;
+
+    nvrhi::IDevice* m_Device;
+    std::unique_ptr<TrianglePass> m_TrianglePass;
   };
 }

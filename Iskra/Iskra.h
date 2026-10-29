@@ -5,7 +5,7 @@
 #include <core/window.h>
 #include <core/GraphicsContext.h>
 #include <core/Swapchain.h>
-#include <core/Renderer.h>
+#include <graphics/Renderer.h>
 #include <scene/Scene.h>
 
 namespace Iskra {
