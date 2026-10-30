@@ -2,7 +2,7 @@
 
 A GPU research environment for implementing and exploring scientific papers in rendering, simulation, and beyond.
 
-Built with C++20, GLFW, and NVRHI using Direct3D 12 on Windows x64.
+Built with C++20, GLFW, GLM, and NVRHI using Direct3D 12 on Windows x64.
 
 ## Build
 
