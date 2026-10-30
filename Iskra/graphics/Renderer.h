@@ -7,6 +7,7 @@
 #include <memory>
 
 #include <graphics/passes/TrianglePass.h>
+#include <graphics/passes/VertexAndIndexBuffersTestPass.h>
 
 namespace Iskra {
 
@@ -21,5 +22,6 @@ namespace Iskra {
 
     nvrhi::IDevice* m_Device;
     std::unique_ptr<TrianglePass> m_TrianglePass;
+    std::unique_ptr<VertexAndIndexBuffersTestPass> m_VertexAndIndexBuffersTestPass;
   };
 }

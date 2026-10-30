@@ -43,6 +43,8 @@ namespace Iskra {
 
     std::array<nvrhi::TextureHandle, BufferCount> m_Backbuffers;
     std::array<nvrhi::FramebufferHandle, BufferCount> m_Framebuffers;
+    std::array<nvrhi::TextureHandle, BufferCount> m_DepthBuffers;
+
     nvrhi::CommandListHandle m_CommandList;
   };
 }

@@ -84,6 +84,7 @@ namespace Iskra {
     FrameContext frame{};
     frame.backbuffer = m_Backbuffers[index].Get();
     frame.framebuffer = m_Framebuffers[index].Get();
+    frame.depthBuffer = m_DepthBuffers[index].Get();
     frame.commandList = m_CommandList.Get();
 
     return frame;
@@ -160,18 +161,35 @@ namespace Iskra {
       desc.initialState = nvrhi::ResourceStates::Present;
       desc.keepInitialState = true;
 
+      nvrhi::TextureDesc depthDesc{};
+      depthDesc.width = m_Size.width;
+      depthDesc.height = m_Size.height;
+      depthDesc.format = nvrhi::Format::D32;
+      depthDesc.isRenderTarget = true;
+      depthDesc.initialState = nvrhi::ResourceStates::DepthWrite;
+      depthDesc.keepInitialState = true;
+      depthDesc.debugName = "Depth Buffer";
+
       m_Backbuffers[i] = m_Device->createHandleForNativeTexture(
         nvrhi::ObjectTypes::D3D12_Resource,
         nvrhi::Object(nativeBuffer.Get()), 
         desc
       );
 
+
       if (!m_Backbuffers[i]) {
         throw std::runtime_error("Failed to wrap backbuffer");
       }
 
+      m_DepthBuffers[i] = m_Device->createTexture(depthDesc);
+
+      if (!m_DepthBuffers[i]) {
+        throw std::runtime_error("Failed to create depth buffer");
+      }
+
       nvrhi::FramebufferDesc framebufferDesc;
       framebufferDesc.addColorAttachment(m_Backbuffers[i]);
+      framebufferDesc.setDepthAttachment(m_DepthBuffers[i]);
 
       m_Framebuffers[i] = m_Device->createFramebuffer(framebufferDesc);
 
@@ -190,6 +208,10 @@ namespace Iskra {
 
     for (auto& backbuffer : m_Backbuffers) {
       backbuffer = nullptr;
+    }
+
+    for (auto& depthBuffer : m_DepthBuffers) {
+      depthBuffer = nullptr;
     }
   }
 

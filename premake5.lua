@@ -38,6 +38,6 @@ project "Iskra"
     filter "files:**.hlsli"
         buildaction "None"
     filter {}
-    includedirs { "Iskra", "external/glfw/include", "external/nvrhi/include", "external/DirectX-Headers/include" }
+    includedirs { "Iskra", "external/glfw/include", "external/nvrhi/include", "external/DirectX-Headers/include", "external/glm" }
     defines { "GLFW_INCLUDE_NONE", "NOMINMAX", "NVRHI_D3D12_WITH_DXRCLUSTER=0" }
     links { "GLFW", "NVRHI", "d3d12", "dxgi", "dxguid", "user32", "gdi32", "shell32" }
