@@ -13,11 +13,18 @@ struct VertexOutput
   float3 color : COLOR;
 };
 
+cbuffer CameraConstants : register(b0)
+{
+  column_major float4x4 model;
+  column_major float4x4 view;
+  column_major float4x4 projection;
+};
+
 VertexOutput VSMain(VertexInput input)
 {
   
   VertexOutput output;
-  output.position = float4(input.position, 1.0f);
+  output.position = mul(projection, mul(view, mul(model, float4(input.position, 1.0f))));
   output.color = input.color;
   return output;
 }

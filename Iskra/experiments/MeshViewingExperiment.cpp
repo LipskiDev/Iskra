@@ -1,8 +1,4 @@
-#include <graphics/passes/VertexAndIndexBuffersTestPass.h>
-
-#include <core/Swapchain.h>
-
-#include <glm/glm.hpp>
+#include <experiments/MeshViewingExperiment.h>
 
 
 #include <fstream>
@@ -10,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
 
 namespace {
 
@@ -38,14 +35,23 @@ namespace {
 }
 
 namespace Iskra {
-  // cube vertices
-  struct Vertex {
-    glm::vec3 position;
-    glm::vec3 color;
-  };
-
-  VertexAndIndexBuffersTestPass::VertexAndIndexBuffersTestPass(nvrhi::IDevice* device, nvrhi::IFramebuffer* framebuffer)
+  void MeshViewingExperiment::OnInit(nvrhi::IDevice* device, const nvrhi::FramebufferInfo& framebufferInfo)
   {
+    m_Device = device;
+    m_Camera = Camera(0.1f, 100.0f, 45.0f, 16.0f / 9.0f);
+    m_Camera.SetPosition(glm::vec3(0.0f, 0.0f, 5.0f));
+    m_Camera.SetOrientation(glm::vec3(0.0, 0.0f, -1.0f));
+    m_CameraController.SetCamera(m_Camera);
+
+    nvrhi::BufferDesc constantBufferDesc{};
+    constantBufferDesc.byteSize = sizeof(ConstantBufferData);
+    constantBufferDesc.debugName = "Constant Buffer";
+    constantBufferDesc.isConstantBuffer = true;
+    constantBufferDesc.initialState = nvrhi::ResourceStates::ConstantBuffer;
+    constantBufferDesc.keepInitialState = true;
+
+    m_ConstantBuffer = device->createBuffer(constantBufferDesc);
+
     const auto vsBytes = ReadBinary("Iskra/shaders/Cube.vs.dxil");
     const auto psBytes = ReadBinary("Iskra/shaders/Cube.ps.dxil");
 
@@ -95,30 +101,54 @@ namespace Iskra {
 
     vertexAttributes[0].elementStride = sizeof(Vertex);
     vertexAttributes[1].elementStride = sizeof(Vertex);
-    
+
     vertexAttributes[0].bufferIndex = 0;
     vertexAttributes[1].bufferIndex = 0;
 
     auto inputLayout = device->createInputLayout(vertexAttributes, 2, vertexShader);
 
+    nvrhi::BindingLayoutDesc bindingLayoutDesc{};
+    bindingLayoutDesc.visibility = nvrhi::ShaderType::Vertex;
+    bindingLayoutDesc.bindings = {
+      { nvrhi::BindingLayoutItem::ConstantBuffer(0) }
+    };
+
+    m_BindingLayout = device->createBindingLayout(bindingLayoutDesc);
+
+    if (!m_BindingLayout) {
+      throw std::runtime_error("Failed to create camera binding layout");
+    }
+
+    nvrhi::BindingSetDesc bindingSetDesc{};
+    bindingSetDesc.bindings = {
+      { nvrhi::BindingSetItem::ConstantBuffer(0, m_ConstantBuffer) }
+    };
+
+    m_BindingSet = device->createBindingSet(bindingSetDesc, m_BindingLayout);
+
+    if (!m_BindingSet) {
+      throw std::runtime_error("Failed to create camera binding set");
+    }
+
+    pipelineDesc.addBindingLayout(m_BindingLayout);
+
     pipelineDesc.inputLayout = inputLayout;
 
-    m_Pipeline = device->createGraphicsPipeline(pipelineDesc, framebuffer->getFramebufferInfo());
+    m_Pipeline = m_Device->createGraphicsPipeline(pipelineDesc, framebufferInfo);
 
     if (!m_Pipeline) {
       throw std::runtime_error("Failed to create cube pipeline");
     }
 
     Vertex vertices[] = {
-      { { -0.5464f, -0.3327f, 0.4212f },{ 1.0f, 0.0f, 0.0f } },
-      { { 0.1464f, -0.4695f, 0.2332f },{ 0.0f, 1.0f, 0.0f } },
-      { { 0.1464f,  0.2823f, 0.0964f },{ 0.0f, 0.0f, 1.0f } },
-      { { -0.5464f,  0.4191f, 0.2844f },{ 1.0f, 1.0f, 0.0f } },
-
-      { { -0.1464f, -0.2823f, 0.9036f },{ 1.0f, 0.5f, 0.5f } },
-      { { 0.5464f, -0.4191f, 0.7156f },{ 0.5f, 1.0f, 0.5f } },
-      { { 0.5464f,  0.3327f, 0.5788f },{ 0.5f, 0.5f, 1.0f } },
-      { { -0.1464f,  0.4695f, 0.7668f },{ 1.0f, 1.0f, 1.0f } }
+       { { -1.0f, -1.0f, -1.0f },{ 1.0f, 0.0f, 0.0f } },
+       { { 1.0f, -1.0f, -1.0f },{ 0.0f, 1.0f, 0.0f } },
+       { { 1.0f,  1.0f, -1.0f },{ 0.0f, 0.0f, 1.0f } },
+       { { -1.0f,  1.0f, -1.0f },{ 1.0f, 1.0f, 0.0f } },
+       { { -1.0f, -1.0f,  1.0f },{ 1.0f, 0.5f, 0.5f } },
+       { { 1.0f, -1.0f,  1.0f },{ 0.5f, 1.0f, 0.5f } },
+       { { 1.0f,  1.0f,  1.0f },{ 0.5f, 0.5f, 1.0f } },
+       { { -1.0f,  1.0f,  1.0f },{ 1.0f, 1.0f, 1.0f } }
     };
 
     unsigned int indices[] = {
@@ -144,6 +174,7 @@ namespace Iskra {
     indexBufferDesc.initialState = nvrhi::ResourceStates::IndexBuffer;
     indexBufferDesc.keepInitialState = true;
 
+
     m_VertexBuffer = device->createBuffer(vertexBufferDesc);
     m_IndexBuffer = device->createBuffer(indexBufferDesc);
 
@@ -157,34 +188,81 @@ namespace Iskra {
     device->executeCommandList(upload);
   }
 
-  void VertexAndIndexBuffersTestPass::Render(const FrameContext& frame)
+  void MeshViewingExperiment::OnUpdate(float deltaTime)
   {
-    
-    nvrhi::GraphicsState state{};
-    state.pipeline = m_Pipeline.Get();
-    state.framebuffer = frame.framebuffer;
-    state.viewport.addViewportAndScissorRect(frame.framebuffer->getFramebufferInfo().getViewport());
+    m_CameraController.OnUpdate(deltaTime);
+  }
+
+  void MeshViewingExperiment::OnInput(float deltaTime, Input& input)
+  {
+    m_CameraController.OnInput(deltaTime, input);
+  }
+
+  void MeshViewingExperiment::OnRender(FrameContext &frame)
+  {
+    frame.commandList->clearDepthStencilTexture(
+      frame.depthBuffer,
+      nvrhi::AllSubresources,
+      true,
+      1.0f,
+      false,
+      0);
+
+    frame.commandList->clearTextureFloat(
+      frame.backbuffer,
+      nvrhi::AllSubresources,
+      nvrhi::Color(0.15, 0.12f, 0.20f, 1.0f));
+
+    ConstantBufferData cbData{};
+    cbData.model = glm::mat4(1.0f);
+    cbData.view = m_Camera.GetViewMatrix();
+    cbData.projection = m_Camera.GetProjectionMatrix();
+
+    frame.commandList->writeBuffer(m_ConstantBuffer, &cbData, sizeof(cbData));
+
+    nvrhi::GraphicsState graphicsState{};
+    graphicsState.bindings = { m_BindingSet };
 
     nvrhi::VertexBufferBinding vertexBufferBinding{};
     vertexBufferBinding.buffer = m_VertexBuffer;
-    vertexBufferBinding.slot = 0;
     vertexBufferBinding.offset = 0;
-
-    state.addVertexBuffer(vertexBufferBinding);
+    vertexBufferBinding.slot = 0;
 
     nvrhi::IndexBufferBinding indexBufferBinding{};
     indexBufferBinding.buffer = m_IndexBuffer;
-    indexBufferBinding.format = nvrhi::Format::R32_UINT;
     indexBufferBinding.offset = 0;
+    indexBufferBinding.format = nvrhi::Format::R32_UINT;
 
+    graphicsState.addVertexBuffer(vertexBufferBinding);
+    graphicsState.setIndexBuffer(indexBufferBinding);
+    graphicsState.pipeline = m_Pipeline;
+    graphicsState.framebuffer = frame.framebuffer;
+    graphicsState.viewport.addViewportAndScissorRect(frame.framebuffer->getFramebufferInfo().getViewport());
 
-    state.setIndexBuffer(indexBufferBinding);
-    frame.commandList->setGraphicsState(state);
+    frame.commandList->setGraphicsState(graphicsState);
+
     nvrhi::DrawArguments drawArgs{};
     drawArgs.vertexCount = 36;
-    drawArgs.startVertexLocation = 0;
-    drawArgs.startIndexLocation = 0;
 
     frame.commandList->drawIndexed(drawArgs);
   }
+
+  void MeshViewingExperiment::OnUiRender(FrameContext &frame)
+  {
+  }
+
+  void MeshViewingExperiment::OnDestroy()
+  {
+  }
+
+  void MeshViewingExperiment::OnResize(int width, int height)
+  {
+  }
+
+  std::string_view MeshViewingExperiment::GetName() const
+  {
+    return std::string_view("Mesh Viewing Experiment");
+  }
+
+
 }

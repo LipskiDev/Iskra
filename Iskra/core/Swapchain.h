@@ -29,6 +29,7 @@ namespace Iskra {
     void Present(FrameContext& frame);
     void Resize(Extent2D newSize);
 
+    nvrhi::FramebufferInfo GetFramebufferInfo() const;
   private:
     void CreateBackbuffers();
     void ReleaseBackbuffers();

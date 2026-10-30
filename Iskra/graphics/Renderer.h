@@ -6,9 +6,6 @@
 
 #include <memory>
 
-#include <graphics/passes/TrianglePass.h>
-#include <graphics/passes/VertexAndIndexBuffersTestPass.h>
-
 namespace Iskra {
 
   class Renderer {
@@ -21,7 +18,5 @@ namespace Iskra {
     nvrhi::GraphicsPipelineHandle trianglePipeline;
 
     nvrhi::IDevice* m_Device;
-    std::unique_ptr<TrianglePass> m_TrianglePass;
-    std::unique_ptr<VertexAndIndexBuffersTestPass> m_VertexAndIndexBuffersTestPass;
   };
 }

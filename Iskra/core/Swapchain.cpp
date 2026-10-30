@@ -146,6 +146,11 @@ namespace Iskra {
     }
   }
 
+  nvrhi::FramebufferInfo Swapchain::GetFramebufferInfo() const
+  {
+    return m_Framebuffers[0]->getFramebufferInfo();
+  }
+
   void Swapchain::CreateBackbuffers()
   {
     for (unsigned int i = 0; i < BufferCount; ++i) {

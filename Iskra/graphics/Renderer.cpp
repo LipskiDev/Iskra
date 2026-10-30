@@ -9,9 +9,6 @@ namespace Iskra {
 
   void Renderer::Render(const FrameContext& frame, const Scene& scene)
   {
-    if (!m_VertexAndIndexBuffersTestPass) {
-      m_VertexAndIndexBuffersTestPass = std::make_unique<VertexAndIndexBuffersTestPass>(m_Device, frame.framebuffer);
-    }
 
     frame.commandList->clearDepthStencilTexture(
       frame.depthBuffer,
@@ -26,8 +23,6 @@ namespace Iskra {
       nvrhi::AllSubresources,
       nvrhi::Color(0.15, 0.72f, 0.20f, 1.0f));
 
-    // m_TrianglePass->Render(frame);
-    m_VertexAndIndexBuffersTestPass->Render(frame);
   }
 
 }
