@@ -50,7 +50,12 @@ namespace Iskra {
       glm::mat4 view;
       glm::mat4 projection;
       glm::mat4 normalMatrix;
+      glm::vec3 toLight;
     };
+
+    float m_SunAzimuth = glm::radians(-124.0f);
+    float m_SunElevation = glm::radians(70.0f);
+    glm::vec3 m_ToLight = { 0.0f, 1.0f, 0.0f };
 
     MeshRenderer m_MeshRenderer;
     RayTracingScene m_RayTracingScene;

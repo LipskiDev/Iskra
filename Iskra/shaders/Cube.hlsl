@@ -19,6 +19,7 @@ cbuffer CameraConstants : register(b0)
   column_major float4x4 view;
   column_major float4x4 projection;
   column_major float4x4 normalMatrix;
+  float3 toLight;
 };
 
 RaytracingAccelerationStructure scene : register(t0);
@@ -61,7 +62,7 @@ float4 PSMain(VertexOutput input) : SV_Target
 {
   float3 N = normalize(input.worldNormal);
   
-  float3 L = normalize(float3(-0.3f, 1.0f, -0.2f));
+  float3 L = normalize(toLight);
   
   float NdotL = saturate(dot(N, L));
   float visibility = 0.0f;

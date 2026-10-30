@@ -202,6 +202,7 @@ namespace Iskra {
       constants.view = m_Camera.GetViewMatrix();
       constants.projection = m_Camera.GetProjectionMatrix();
       constants.normalMatrix = glm::transpose(glm::inverse(item.worldTransform));
+      constants.toLight = m_ToLight;
 
       frame.commandList->writeBuffer(
         m_ConstantBuffer, &constants, sizeof(constants));
@@ -221,6 +222,10 @@ namespace Iskra {
   void MeshViewingExperiment::OnUpdate(float deltaTime)
   {
     m_CameraController.OnUpdate(deltaTime);
+    m_ToLight = glm::vec3(
+      cos(m_SunElevation) * sin(m_SunAzimuth),
+      sin(m_SunElevation),
+      cos(m_SunElevation) * cos(m_SunAzimuth));
   }
 
   void MeshViewingExperiment::OnInput(float deltaTime, Input& input)
