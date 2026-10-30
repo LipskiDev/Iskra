@@ -3,12 +3,11 @@
 #include <experiments/Experiment.h>
 #include <scene/Camera.h>
 #include <scene/OrbitCameraController.h>
+#include <assets/ModelData.h>
+#include <graphics/GpuMesh.h>
+#include <graphics/MeshRenderer.h>
 
 namespace Iskra {
-  struct Vertex {
-    glm::vec3 position;
-    glm::vec3 color;
-  };
 
   class MeshViewingExperiment : public Experiment {
   public:
@@ -24,23 +23,15 @@ namespace Iskra {
 
     std::string_view GetName() const override;
 
+
+
   private:
     Camera m_Camera;
     OrbitCameraController m_CameraController;
 
-    nvrhi::GraphicsPipelineHandle m_Pipeline;
-    nvrhi::BufferHandle m_VertexBuffer;
-    nvrhi::BufferHandle m_IndexBuffer;
+    ModelData m_Model;
+    std::vector<GpuMesh> m_GpuMeshes;
 
-    nvrhi::BufferHandle m_ConstantBuffer;
-
-    nvrhi::BindingLayoutHandle m_BindingLayout;
-    nvrhi::BindingSetHandle m_BindingSet;
-
-    struct ConstantBufferData {
-      glm::mat4 model;
-      glm::mat4 view;
-      glm::mat4 projection;
-    };
+    MeshRenderer m_MeshRenderer;
   };
 }
