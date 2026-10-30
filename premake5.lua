@@ -34,11 +34,10 @@ project "Iskra"
     vpaths {
         ["Shaders"] = { "Iskra/**.hlsl", "Iskra/**.hlsli" }
     }
-    filter "files:**.hlsl"
-        buildaction "None"
     filter "files:**.hlsli"
         buildaction "None"
     filter {}
+    include "premake/shaders.lua"
     includedirs { "Iskra", "external/glfw/include", "external/nvrhi/include", "external/DirectX-Headers/include", "external/glm" }
     includedirs { "external/assimp/include", "build/assimp-cmake/%{cfg.buildcfg}/include" }
     libdirs { "bin/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/Assimp" }

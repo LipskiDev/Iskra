@@ -18,6 +18,7 @@ namespace Iskra {
     vertexDesc.isVertexBuffer = true;
     vertexDesc.initialState = nvrhi::ResourceStates::VertexBuffer;
     vertexDesc.keepInitialState = true;
+    vertexDesc.isAccelStructBuildInput = true;
     vertexDesc.debugName = "Mesh Vertex Buffer";
 
     nvrhi::BufferDesc indexDesc{};
@@ -25,11 +26,13 @@ namespace Iskra {
     indexDesc.isIndexBuffer = true;
     indexDesc.initialState = nvrhi::ResourceStates::IndexBuffer;
     indexDesc.keepInitialState = true;
+    indexDesc.isAccelStructBuildInput = true;
     indexDesc.debugName = "Mesh Index Buffer";
 
     GpuMesh result{};
     result.vertexBuffer = device->createBuffer(vertexDesc);
     result.indexBuffer = device->createBuffer(indexDesc);
+    result.vertexCount = static_cast<uint32_t>(meshData.vertices.size());
     result.indexCount = static_cast<uint32_t>(meshData.indices.size());
 
     if (!result.vertexBuffer || !result.indexBuffer) {
@@ -41,4 +44,6 @@ namespace Iskra {
 
     return result;
   }
+
+  
 }

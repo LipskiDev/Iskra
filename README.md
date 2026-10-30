@@ -13,3 +13,5 @@ Requires Visual Studio with Desktop development with C++, a Windows SDK, Premake
 3. Open `Iskra.sln` and build Debug, Release, or Profile.
 
 Assimp v6.0.5 is included as a submodule and built automatically with CMake. Its DLL is placed beside the application.
+
+Shaders compile automatically with DXC (`dxc.exe` on PATH). Each `.hlsl` file uses `VSMain` and `PSMain` entry points, targeting shader model 6.5. Output goes to the application's `shaders/` directory for each configuration. Shared `.hlsli` changes also trigger compilation.
