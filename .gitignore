@@ -39,3 +39,6 @@ Desktop.ini
 
 # compiled shaders
 *.dxil
+
+# Local ImGui window layout
+imgui.ini

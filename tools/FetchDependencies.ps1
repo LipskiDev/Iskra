@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
-& git -C $projectRoot submodule update --init --recursive -- external/glm external/assimp
+& git -C $projectRoot submodule update --init --recursive -- external/glm external/assimp external/imgui
 if ($LASTEXITCODE -ne 0) { throw 'Submodule initialization failed' }
 $dependencies = @(
     @{ Name = 'glfw'; Url = 'https://github.com/glfw/glfw.git'; Revision = '7b6aead9fb88b3623e3b3725ebb42670cbe4c579' },

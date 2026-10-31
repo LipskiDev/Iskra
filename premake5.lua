@@ -23,6 +23,7 @@ group "Dependencies"
 include "premake/glfw.lua"
 include "premake/nvrhi.lua"
 include "premake/assimp.lua"
+include "premake/imgui.lua"
 group ""
 project "Iskra"
     location "build/Iskra"
@@ -39,10 +40,11 @@ project "Iskra"
     filter {}
     include "premake/shaders.lua"
     includedirs { "Iskra", "external/glfw/include", "external/nvrhi/include", "external/DirectX-Headers/include", "external/glm" }
+    includedirs { "external/imgui" }
     includedirs { "external/assimp/include", "build/assimp-cmake/%{cfg.buildcfg}/include" }
     libdirs { "bin/%{cfg.buildcfg}-%{cfg.system}-%{cfg.architecture}/Assimp" }
     dependson { "Assimp" }
     links { "assimp.lib" }
     defines { "ASSIMP_DLL" }
     defines { "GLFW_INCLUDE_NONE", "NOMINMAX", "NVRHI_D3D12_WITH_DXRCLUSTER=0" }
-    links { "GLFW", "NVRHI", "d3d12", "dxgi", "dxguid", "user32", "gdi32", "shell32" }
+    links { "ImGui", "GLFW", "NVRHI", "d3d12", "dxgi", "dxguid", "user32", "gdi32", "shell32", "dwmapi" }

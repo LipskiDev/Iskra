@@ -3,6 +3,7 @@
 #include <assets/ModelLoader.h>
 #include <graphics/MeshUploader.h>
 #include <graphics/ModelTraversal.h>
+#include <imgui.h>
 
 #include <cstddef>
 #include <fstream>
@@ -250,6 +251,14 @@ namespace Iskra {
 
   void MeshViewingExperiment::OnUiRender(FrameContext& frame)
   {
+    ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(340.0f, 180.0f), ImGuiCond_FirstUseEver);
+    ImGui::Begin("Lighting");
+    ImGui::SliderAngle("Sun azimuth", &m_SunAzimuth, -180.0f, 180.0f);
+    ImGui::SliderAngle("Sun elevation", &m_SunElevation, 1.0f, 89.0f);
+    ImGui::Text("Direction: %.2f, %.2f, %.2f", m_ToLight.x, m_ToLight.y, m_ToLight.z);
+    ImGui::Text("%.1f FPS", ImGui::GetIO().Framerate);
+    ImGui::End();
   }
 
   void MeshViewingExperiment::OnDestroy()

@@ -6,6 +6,7 @@
 #include <core/GraphicsContext.h>
 #include <core/Swapchain.h>
 #include <core/Input.h>
+#include <graphics/ImGuiRenderer.h>
 #include <scene/Scene.h>
 #include <experiments/Experiment.h>
 #include <experiments/MeshViewingExperiment.h>
@@ -17,6 +18,8 @@ namespace Iskra {
     Input m_Input;
     GraphicsContext m_Graphics;
     Swapchain m_Swapchain;
+    ImGuiRenderer m_ImGuiRenderer;
+    bool m_ImGuiInitialized = false;
     std::unique_ptr<Experiment> m_Experiment = nullptr;
   public:
     Application() : m_Window("Iskra", 1920, 1080), m_Input(m_Window.GetHandle()), m_Graphics(GraphicsConfig()), m_Swapchain(m_Graphics, m_Window)
@@ -26,5 +29,6 @@ namespace Iskra {
     }
 
     void Run();
+    ~Application();
   };
 }

@@ -17,12 +17,18 @@ namespace Iskra {
 
   bool Input::IsKeyPressed(int key)
   {
-    return glfwGetKey(m_Window, key) == GLFW_PRESS;
+    return !m_CaptureKeyboard && glfwGetKey(m_Window, key) == GLFW_PRESS;
   }
 
   bool Input::IsMouseButtonPressed(int button)
   {
-    return glfwGetMouseButton(m_Window, button) == GLFW_PRESS;
+    return !m_CaptureMouse && glfwGetMouseButton(m_Window, button) == GLFW_PRESS;
+  }
+
+  void Input::SetCapture(bool mouse, bool keyboard)
+  {
+    m_CaptureMouse = mouse;
+    m_CaptureKeyboard = keyboard;
   }
 
   std::pair<float, float> Input::GetMousePosition()

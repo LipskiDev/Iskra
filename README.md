@@ -15,3 +15,5 @@ Requires Visual Studio with Desktop development with C++, a Windows SDK, Premake
 Assimp v6.0.5 is included as a submodule and built automatically with CMake. Its DLL is placed beside the application.
 
 Shaders compile automatically with DXC (`dxc.exe` on PATH). Each `.hlsl` file uses `VSMain` and `PSMain` entry points, targeting shader model 6.5. Output goes to the application's `shaders/` directory for each configuration. Shared `.hlsli` changes also trigger compilation.
+
+The ImGui overlay uses GLFW for input and NVRHI for rendering. The Lighting panel controls sun azimuth and elevation; interacting with the UI captures camera input. Docking and additional OS windows are not enabled.
