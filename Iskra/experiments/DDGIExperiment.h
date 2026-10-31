@@ -11,10 +11,10 @@
 
 namespace Iskra {
 
-  class MeshViewingExperiment : public Experiment {
+  class DDGIExperiment : public Experiment {
   public:
     void OnInit(nvrhi::IDevice* device, const nvrhi::FramebufferInfo& framebufferInfo) override;
-    ~MeshViewingExperiment() = default;
+    ~DDGIExperiment() = default;
 
     void OnUpdate(float deltaTime) override;
     void OnInput(float deltaTime, Input& input) override;

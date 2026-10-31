@@ -1,4 +1,4 @@
-#include <experiments/MeshViewingExperiment.h>
+#include <experiments/DDGIExperiment.h>
 
 #include <assets/ModelLoader.h>
 #include <graphics/MeshUploader.h>
@@ -39,7 +39,7 @@ namespace {
 }
 
 namespace Iskra {
-  void MeshViewingExperiment::OnInit(nvrhi::IDevice* device, const nvrhi::FramebufferInfo& framebufferInfo)
+  void DDGIExperiment::OnInit(nvrhi::IDevice* device, const nvrhi::FramebufferInfo& framebufferInfo)
   {
     m_Device = device;
     m_Camera = Camera(0.1f, 100.0f, 45.0f, 16.0f / 9.0f);
@@ -52,9 +52,9 @@ namespace Iskra {
     CreatePipeline(framebufferInfo);
   }
 
-  void MeshViewingExperiment::LoadScene()
+  void DDGIExperiment::LoadScene()
   {
-    m_Model = ModelLoader::Load("assets/models/Sponza.glb");
+    m_Model = ModelLoader::Load("assets/models/sponza/Sponza.gltf");
 
     m_DrawItems.clear();
     CollectDrawItems(m_Model.root, glm::mat4(1.0f), m_DrawItems);
@@ -85,7 +85,7 @@ namespace Iskra {
     }
   }
 
-  void MeshViewingExperiment::CreateBindings()
+  void DDGIExperiment::CreateBindings()
   {
     nvrhi::BufferDesc constantBufferDesc{};
     constantBufferDesc.byteSize = sizeof(ConstantBufferData);
@@ -127,19 +127,19 @@ namespace Iskra {
     }
   }
 
-  void MeshViewingExperiment::CreatePipeline(const nvrhi::FramebufferInfo& outputInfo)
+  void DDGIExperiment::CreatePipeline(const nvrhi::FramebufferInfo& outputInfo)
   {
-    const auto vsBytes = ReadBinary(ISKRA_SHADER_DIR "/Cube.vs.dxil");
-    const auto psBytes = ReadBinary(ISKRA_SHADER_DIR "/Cube.ps.dxil");
+    const auto vsBytes = ReadBinary(ISKRA_SHADER_DIR "/DDGI.vs.dxil");
+    const auto psBytes = ReadBinary(ISKRA_SHADER_DIR "/DDGI.ps.dxil");
 
     nvrhi::ShaderDesc vsDesc{};
     vsDesc.shaderType = nvrhi::ShaderType::Vertex;
-    vsDesc.debugName = "Cube.vs";
+    vsDesc.debugName = "DDGI.vs";
     vsDesc.entryName = "VSMain";
 
     nvrhi::ShaderDesc psDesc{};
     psDesc.shaderType = nvrhi::ShaderType::Pixel;
-    psDesc.debugName = "Cube.ps";
+    psDesc.debugName = "DDGI.ps";
     psDesc.entryName = "PSMain";
 
     auto vertexShader = m_Device->createShader(vsDesc, vsBytes.data(), vsBytes.size());
@@ -195,7 +195,7 @@ namespace Iskra {
     }
   }
 
-  void MeshViewingExperiment::RenderGeometry(const FrameContext& frame)
+  void DDGIExperiment::RenderGeometry(const FrameContext& frame)
   {
     for (const MeshDrawItem& item : m_DrawItems) {
       ConstantBufferData constants{};
@@ -220,7 +220,7 @@ namespace Iskra {
     }
   }
 
-  void MeshViewingExperiment::OnUpdate(float deltaTime)
+  void DDGIExperiment::OnUpdate(float deltaTime)
   {
     m_CameraController.OnUpdate(deltaTime);
     m_ToLight = glm::vec3(
@@ -229,12 +229,12 @@ namespace Iskra {
       cos(m_SunElevation) * cos(m_SunAzimuth));
   }
 
-  void MeshViewingExperiment::OnInput(float deltaTime, Input& input)
+  void DDGIExperiment::OnInput(float deltaTime, Input& input)
   {
     m_CameraController.OnInput(deltaTime, input);
   }
 
-  void MeshViewingExperiment::OnRender(FrameContext& frame)
+  void DDGIExperiment::OnRender(FrameContext& frame)
   {
     frame.commandList->clearDepthStencilTexture(
       frame.depthBuffer,
@@ -249,7 +249,7 @@ namespace Iskra {
     RenderGeometry(frame);
   }
 
-  void MeshViewingExperiment::OnUiRender(FrameContext& frame)
+  void DDGIExperiment::OnUiRender(FrameContext& frame)
   {
     ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(340.0f, 180.0f), ImGuiCond_FirstUseEver);
@@ -261,17 +261,17 @@ namespace Iskra {
     ImGui::End();
   }
 
-  void MeshViewingExperiment::OnDestroy()
+  void DDGIExperiment::OnDestroy()
   {
   }
 
-  void MeshViewingExperiment::OnResize(int width, int height)
+  void DDGIExperiment::OnResize(int width, int height)
   {
   }
 
-  std::string_view MeshViewingExperiment::GetName() const
+  std::string_view DDGIExperiment::GetName() const
   {
-    return std::string_view("Mesh Viewing Experiment");
+    return std::string_view("DDGI Experiment");
   }
 
 }

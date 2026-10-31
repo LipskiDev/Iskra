@@ -1,4 +1,4 @@
-// Cube.hlsl
+// DDGI.hlsl
 
 struct VertexInput
 {

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <iostream>
 
@@ -9,7 +9,7 @@
 #include <graphics/ImGuiRenderer.h>
 #include <scene/Scene.h>
 #include <experiments/Experiment.h>
-#include <experiments/MeshViewingExperiment.h>
+#include <experiments/DDGIExperiment.h>
 
 namespace Iskra {
   class Application {
@@ -24,7 +24,7 @@ namespace Iskra {
   public:
     Application() : m_Window("Iskra", 1920, 1080), m_Input(m_Window.GetHandle()), m_Graphics(GraphicsConfig()), m_Swapchain(m_Graphics, m_Window)
     {
-      m_Experiment = std::make_unique<MeshViewingExperiment>();
+      m_Experiment = std::make_unique<DDGIExperiment>();
       m_Experiment->OnInit(m_Graphics.GetDevice(), m_Swapchain.GetFramebufferInfo());
     }
 
