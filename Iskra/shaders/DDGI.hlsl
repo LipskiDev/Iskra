@@ -1,4 +1,4 @@
-// DDGI.hlsl
+//@stages vs ps
 
 struct VertexInput
 {

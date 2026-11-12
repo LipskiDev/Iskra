@@ -1,3 +1,4 @@
+//@stages vs ps
 cbuffer UiConstants : register(b0)
 {
   float2 scale;
