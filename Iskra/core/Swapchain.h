@@ -28,6 +28,7 @@ namespace Iskra {
 
     void Present(FrameContext& frame);
     void Resize(Extent2D newSize);
+    bool WaitForIdle();
 
     nvrhi::FramebufferInfo GetFramebufferInfo() const;
   private:
@@ -46,6 +47,11 @@ namespace Iskra {
     std::array<nvrhi::FramebufferHandle, BufferCount> m_Framebuffers;
     std::array<nvrhi::TextureHandle, BufferCount> m_DepthBuffers;
 
-    nvrhi::CommandListHandle m_CommandList;
+    struct FrameSlot {
+      nvrhi::CommandListHandle commandList;
+      nvrhi::EventQueryHandle completion;
+    };
+    std::array<FrameSlot, BufferCount> m_Frames;
+    unsigned int m_FrameIndex = 0;
   };
 }

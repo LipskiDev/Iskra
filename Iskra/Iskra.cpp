@@ -8,7 +8,7 @@ using namespace std;
 namespace Iskra {
   Application::~Application()
   {
-    m_Graphics.GetDevice()->waitForIdle();
+    m_Swapchain.WaitForIdle();
     m_ImGuiRenderer.Shutdown();
     if (m_ImGuiInitialized) {
       ImGui_ImplGlfw_Shutdown();

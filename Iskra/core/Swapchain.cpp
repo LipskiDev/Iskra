@@ -9,7 +9,8 @@
 namespace {
   void CheckHR(HRESULT result, const char* operation) {
     if (FAILED(result)) {
-      throw std::runtime_error(std::string(operation) + " failed");
+      throw std::runtime_error(std::string(operation) + " failed, HRESULT = "
+        + std::to_string(static_cast<unsigned long>(result)));
     }
   }
 }
@@ -48,6 +49,7 @@ namespace Iskra {
 
     Microsoft::WRL::ComPtr<IDXGISwapChain1> swapchain;
 
+    // Backbuffer-writing command lists must execute on the swapchain's queue.
     CheckHR(m_Factory->CreateSwapChainForHwnd(graphics.GetGraphicsQueue(), hwnd, &desc, nullptr, nullptr, &swapchain), "CreateSwapChainForHwnd");
 
     CheckHR(
@@ -61,16 +63,31 @@ namespace Iskra {
 
     CreateBackbuffers();
 
-    m_CommandList = m_Device->createCommandList();
-
-    if (!m_CommandList) {
-      throw std::runtime_error("Failed to create command list");
+    for (auto& frame : m_Frames) {
+      frame.commandList = m_Device->createCommandList();
+      frame.completion = m_Device->createEventQuery();
+      if (!frame.commandList || !frame.completion) {
+        throw std::runtime_error("Failed to create frame resources");
+      }
     }
+
   }
 
   Swapchain::~Swapchain()
   {
-    m_Device->waitForIdle();
+    WaitForIdle();
+  }
+
+  bool Swapchain::WaitForIdle()
+  {
+    // NVRHI only waits through its last submission. Submit a marker after
+    // DXGI's Present work so its completion fence covers presentation too.
+    auto marker = m_Device->createCommandList();
+    if (!marker) return false;
+    marker->open();
+    marker->close();
+    m_Device->executeCommandList(marker);
+    return m_Device->waitForIdle();
   }
 
   std::optional<FrameContext> Swapchain::BeginFrame()
@@ -78,14 +95,19 @@ namespace Iskra {
     if (m_Size.width == 0 || m_Size.height == 0) return std::nullopt;
 
     const unsigned int index = m_Swapchain->GetCurrentBackBufferIndex();
+    m_FrameIndex = index;
+    auto& slot = m_Frames[m_FrameIndex];
 
-    m_CommandList->open();
+    m_Device->waitEventQuery(slot.completion);
+    m_Device->resetEventQuery(slot.completion);
+    m_Device->runGarbageCollection();
+    slot.commandList->open();
 
     FrameContext frame{};
     frame.backbuffer = m_Backbuffers[index].Get();
     frame.framebuffer = m_Framebuffers[index].Get();
     frame.depthBuffer = m_DepthBuffers[index].Get();
-    frame.commandList = m_CommandList.Get();
+    frame.commandList = slot.commandList.Get();
 
     return frame;
   }
@@ -94,15 +116,9 @@ namespace Iskra {
   {
     frame.commandList->close();
     m_Device->executeCommandList(frame.commandList);
+    m_Device->setEventQuery(m_Frames[m_FrameIndex].completion, nvrhi::CommandQueue::Graphics);
 
-    CheckHR(m_Swapchain->Present(1, 0), "Present");
-
-    // Simple synchronization for a first MVP
-    if (!m_Device->waitForIdle()) {
-      throw std::runtime_error("Failed to wait for GPU");
-    }
-
-    m_Device->runGarbageCollection();
+    CheckHR(m_Swapchain->Present(0, 0), "Present");
   }
 
   void Swapchain::Resize(Extent2D newSize)
@@ -118,12 +134,15 @@ namespace Iskra {
       return;
     }
 
-    if (!m_Device->waitForIdle()) {
+    if (!WaitForIdle()) {
       throw std::runtime_error("Failed to wait before resize");
     }
 
     // Discards the command list too, so it cannot retain old buffer.
-    m_CommandList = nullptr;
+    for (auto& frame : m_Frames) {
+      frame.commandList = nullptr;
+      m_Device->resetEventQuery(frame.completion);
+    }
     ReleaseBackbuffers();
     m_Device->runGarbageCollection();
 
@@ -139,10 +158,11 @@ namespace Iskra {
     m_Size = newSize;
     CreateBackbuffers();
 
-    m_CommandList = m_Device->createCommandList();
-
-    if (!m_CommandList) {
-      throw std::runtime_error("Failed to recreate command list");
+    for (auto& frame : m_Frames) {
+      frame.commandList = m_Device->createCommandList();
+      if (!frame.commandList) {
+        throw std::runtime_error("Failed to recreate frame command list");
+      }
     }
   }
 

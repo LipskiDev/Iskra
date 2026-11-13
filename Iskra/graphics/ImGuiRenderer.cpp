@@ -186,7 +186,6 @@ namespace Iskra {
     }
 
     auto& resources = m_Textures.at(texture->GetTexID());
-    // Upload the whole atlas on updates. The existing frame fence protects reuse.
     if (texture->Format == ImTextureFormat_RGBA32) {
       commandList->writeTexture(resources.texture, 0, 0, texture->GetPixels(), texture->GetPitch());
     }
