@@ -2,7 +2,7 @@
 
 #include <experiments/Experiment.h>
 #include <scene/Camera.h>
-#include <scene/OrbitCameraController.h>
+#include <scene/FlyingCameraController.h>
 #include <assets/ModelData.h>
 #include <graphics/GpuMesh.h>
 #include <graphics/MeshRenderer.h>
@@ -34,7 +34,7 @@ namespace Iskra {
     void RenderGeometry(const FrameContext& frame);
 
     Camera m_Camera;
-    OrbitCameraController m_CameraController;
+    FlyingCameraController m_CameraController;
 
     ModelData m_Model;
     std::vector<GpuMesh> m_GpuMeshes;
