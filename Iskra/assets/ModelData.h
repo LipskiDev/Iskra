@@ -1,6 +1,8 @@
 #pragma once
 
 #include <assets/MeshData.h>
+#include <assets/MaterialData.h>
+#include <assets/TextureData.h>
 #include <glm/glm.hpp>
 #include <cstdint>
 #include <vector>
@@ -23,5 +25,7 @@ namespace Iskra {
   struct ModelData {
     std::vector<MeshData> meshes;
     ModelNode root;
+    std::vector<Material> materials;
+    std::vector<Texture> textures;
   };
 }

@@ -2,7 +2,7 @@
 
 #include <nvrhi/nvrhi.h>
 #include <assets/ModelData.h>
-#include <graphics/GpuMesh.h>
+#include <graphics/GpuData.h>
 
 namespace Iskra {
   class RayTracingScene {

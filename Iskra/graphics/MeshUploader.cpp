@@ -1,5 +1,7 @@
 #include <graphics/MeshUploader.h>
 
+#include <iostream>
+
 #include <stdexcept>
 
 namespace Iskra {
@@ -43,6 +45,11 @@ namespace Iskra {
     commandList->writeBuffer(result.indexBuffer, meshData.indices.data(), indexDesc.byteSize);
 
     return result;
+  }
+
+  GpuTexture UploadTexture(nvrhi::IDevice* device, nvrhi::ICommandList* commandList, const Texture& textureData)
+  {
+    return GpuTexture();
   }
 
   

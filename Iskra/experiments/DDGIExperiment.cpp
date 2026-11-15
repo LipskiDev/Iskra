@@ -1,6 +1,5 @@
 #include <experiments/DDGIExperiment.h>
 
-#include <assets/ModelLoader.h>
 #include <graphics/MeshUploader.h>
 #include <graphics/ModelTraversal.h>
 #include <imgui.h>
@@ -47,14 +46,16 @@ namespace Iskra {
     m_Camera.SetOrientation(glm::vec3(0.0, 0.0f, -1.0f));
     m_CameraController.SetCamera(m_Camera);
 
+    m_AssetRegistry.Initialize(m_Device, nullptr);
     LoadScene();
+    m_AssetRegistry.UpdateResourcesIfDirty();
     CreateBindings();
     CreatePipeline(framebufferInfo);
   }
 
   void DDGIExperiment::LoadScene()
   {
-    m_Model = ModelLoader::Load("assets/models/sponza/Sponza.gltf");
+    m_Model = m_AssetRegistry.LoadModel("assets/models/sponza/Sponza.gltf");
 
     m_DrawItems.clear();
     CollectDrawItems(m_Model.root, glm::mat4(1.0f), m_DrawItems);

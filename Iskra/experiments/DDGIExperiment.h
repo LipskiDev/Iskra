@@ -4,7 +4,8 @@
 #include <scene/Camera.h>
 #include <scene/FlyingCameraController.h>
 #include <assets/ModelData.h>
-#include <graphics/GpuMesh.h>
+#include <assets/AssetRegistry.h>
+#include <graphics/GpuData.h>
 #include <graphics/MeshRenderer.h>
 #include <graphics/MeshDrawItem.h>
 #include <graphics/RayTracingScene.h>
@@ -36,6 +37,7 @@ namespace Iskra {
     Camera m_Camera;
     FlyingCameraController m_CameraController;
 
+    AssetRegistry m_AssetRegistry;
     ModelData m_Model;
     std::vector<GpuMesh> m_GpuMeshes;
     std::vector<MeshDrawItem> m_DrawItems;

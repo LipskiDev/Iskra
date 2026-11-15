@@ -1,6 +1,6 @@
 #pragma once
 
-#include <graphics/GpuMesh.h>
+#include <graphics/GpuData.h>
 
 namespace Iskra {
   class MeshRenderer {
