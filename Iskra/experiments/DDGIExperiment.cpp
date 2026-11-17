@@ -4,6 +4,8 @@
 #include <graphics/ModelTraversal.h>
 #include <imgui.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <fstream>
 #include <iterator>
@@ -218,6 +220,447 @@ namespace Iskra {
 
       m_MeshRenderer.Draw(frame.commandList,
         m_GpuMeshes.at(item.meshIndex), state);
+    }
+  }
+
+  void DDGIExperiment::RenderProbeVisualization(const FrameContext& frame)
+  {
+    DDGIConstants ddgiConstants{};
+    ddgiConstants.irradianceQuadSize = m_DDGIResources.desc.probeIrradianceResolution;
+    ddgiConstants.probeGridOrigin = m_DDGIResources.desc.center - m_DDGIResources.desc.halfSize;
+    ddgiConstants.probeGridSpacing = 2.0f * m_DDGIResources.desc.halfSize / m_DDGIResources.desc.probeCount;
+    ddgiConstants.probeGridSize = m_DDGIResources.desc.probeCount;
+    frame.commandList->writeBuffer(m_DDGIResources.ddgiConstants, &ddgiConstants, sizeof(ddgiConstants));
+
+    CameraConstants cameraConstants{};
+    cameraConstants.view = m_Camera.GetViewMatrix();
+    cameraConstants.projection = m_Camera.GetProjectionMatrix();
+
+    frame.commandList->writeBuffer(
+      m_DDGIResources.cameraConstants, &cameraConstants, sizeof(cameraConstants));
+
+    nvrhi::MeshletState state{};
+    state.pipeline = m_DDGIResources.probeVisualizationPipeline.Get();
+    state.framebuffer = frame.framebuffer;
+    state.addBindingSet(m_DDGIResources.probeVisualizationBindingSet[m_DDGIResources.currentProbeAtlas]);
+    state.viewport.addViewportAndScissorRect(
+      frame.framebuffer->getFramebufferInfo().getViewport());
+
+    frame.commandList->setMeshletState(state);
+    frame.commandList->dispatchMesh(static_cast<uint32_t>(m_DDGIResources.desc.probeCount.x * m_DDGIResources.desc.probeCount.y * m_DDGIResources.desc.probeCount.z), 1, 1);
+  }
+
+  void DDGIExperiment::UpdateProbeIrradiances(const FrameContext& frame)
+  {
+    DDGIConstants ddgiConstants{};
+
+    float randomAngle =
+      (2.0f * static_cast<float>(rand()) / RAND_MAX - 1.0f) * 0.001f;
+
+    ddgiConstants.toLight = m_ToLight;
+    ddgiConstants.randomAngle = randomAngle;
+    ddgiConstants.probeHysteresis = m_DDGIResources.desc.probeHysteresis;
+    glm::vec3 probeSpacing = 2.0f * m_DDGIResources.desc.halfSize / m_DDGIResources.desc.probeCount;
+    ddgiConstants.probeMaxRayDistance = std::min(m_DDGIResources.desc.probeMaxRayDistance,
+      1.5f * std::max({ probeSpacing.x, probeSpacing.y, probeSpacing.z }));
+
+    frame.commandList->writeBuffer(
+      m_DDGIResources.ddgiConstants, &ddgiConstants, sizeof(ddgiConstants));
+
+    nvrhi::ComputeState state{};
+    state.pipeline = m_DDGIResources.probeRayTracingPipeline.Get();
+    state.addBindingSet(m_DDGIResources.probeRayTracingBindingSet);
+    state.addBindingSet(m_AssetRegistry.GetBindlessTextureDescriptorTable());
+    frame.commandList->setComputeState(state);
+    frame.commandList->dispatch(
+      static_cast<uint32_t>(m_DDGIResources.desc.probeCount.x * m_DDGIResources.desc.probeCount.y * m_DDGIResources.desc.probeCount.z), 1, 1);
+
+    uint32_t previousAtlas = m_DDGIResources.currentProbeAtlas;
+    uint32_t nextAtlas = 1 - previousAtlas;
+    for (uint32_t pass = 0; pass < 2; ++pass) {
+      auto texture = pass == 0 ? m_DDGIResources.probeGridIrradiance[nextAtlas]
+        : m_DDGIResources.probeGridDistance[nextAtlas];
+      const auto& textureDesc = texture->getDesc();
+      ddgiConstants.irradiance = pass;
+      ddgiConstants.irradianceTextureSize = textureDesc.width;
+      ddgiConstants.irradianceQuadSize = pass == 0 ? m_DDGIResources.desc.probeIrradianceResolution
+        : m_DDGIResources.desc.probeDistanceResolution;
+      frame.commandList->writeBuffer(
+        m_DDGIResources.ddgiConstants, &ddgiConstants, sizeof(ddgiConstants));
+
+      nvrhi::ComputeState updateState{};
+      updateState.pipeline = m_DDGIResources.probeIrradianceUpdatePipeline.Get();
+      updateState.addBindingSet(pass == 0 ? m_DDGIResources.probeIrradianceUpdateBindingSet[previousAtlas]
+        : m_DDGIResources.probeVisibilityUpdateBindingSet[previousAtlas]);
+      frame.commandList->setComputeState(updateState);
+      frame.commandList->dispatch((textureDesc.width + 7) / 8, (textureDesc.height + 7) / 8, 1);
+    }
+    m_DDGIResources.currentProbeAtlas = nextAtlas;
+  }
+
+  void DDGIExperiment::InitializeDDGI(DDGIVolumeDesc desc, const nvrhi::FramebufferInfo& outputInfo)
+  {
+    if (desc.probeNumRays != 128 || desc.probeIrradianceResolution <= 0 || desc.probeDistanceResolution <= 0 ||
+      desc.probeCount.x <= 0 || desc.probeCount.y <= 0 || desc.probeCount.z <= 0 ||
+      desc.probeCount.x != std::floor(desc.probeCount.x) ||
+      desc.probeCount.y != std::floor(desc.probeCount.y) ||
+      desc.probeCount.z != std::floor(desc.probeCount.z)) {
+      throw std::runtime_error("DDGI requires positive integer probe counts, positive resolutions and 128 rays per probe");
+    }
+    m_DDGIResources.currentProbeAtlas = 0;
+    m_DDGIResources.desc = desc;
+    InitializeDDGIResources(desc);
+    InitializeDDGIBindings(desc);
+    InitDDGIPipeline(outputInfo);
+  }
+
+  void DDGIExperiment::InitializeDDGIResources(DDGIVolumeDesc desc)
+  {
+    glm::vec3 volumeCenter = desc.center;
+    glm::vec3 volumeExtents = desc.halfSize;
+    std::vector<glm::vec3> probePositions;
+
+    for (int x = 0; x < desc.probeCount.x; ++x) {
+      for (int y = 0; y < desc.probeCount.y; ++y) {
+        for (int z = 0; z < desc.probeCount.z; ++z) {
+          glm::vec3 probePos = volumeCenter + glm::vec3(
+            (x + 0.5f) / desc.probeCount.x * 2.0f * volumeExtents.x - volumeExtents.x,
+            (y + 0.5f) / desc.probeCount.y * 2.0f * volumeExtents.y - volumeExtents.y,
+            (z + 0.5f) / desc.probeCount.z * 2.0f * volumeExtents.z - volumeExtents.z);
+          probePositions.push_back(probePos);
+        }
+      }
+    }
+
+    nvrhi::BufferDesc probePositionsBufferDesc{};
+    probePositionsBufferDesc.byteSize = probePositions.size() * sizeof(glm::vec3);
+    probePositionsBufferDesc.debugName = "Probe Positions Buffer";
+    probePositionsBufferDesc.initialState = nvrhi::ResourceStates::ShaderResource;
+    probePositionsBufferDesc.keepInitialState = true;
+    probePositionsBufferDesc.structStride = sizeof(glm::vec3);
+
+    m_DDGIResources.probePositions = m_Device->createBuffer(probePositionsBufferDesc);
+
+    nvrhi::BufferDesc cameraConstantsBufferDesc{};
+    cameraConstantsBufferDesc.byteSize = sizeof(CameraConstants);
+    cameraConstantsBufferDesc.debugName = "Camera Constants Buffer";
+    cameraConstantsBufferDesc.initialState = nvrhi::ResourceStates::ConstantBuffer;
+    cameraConstantsBufferDesc.keepInitialState = true;
+    cameraConstantsBufferDesc.isVolatile = true;
+    cameraConstantsBufferDesc.isConstantBuffer = true;
+
+    m_DDGIResources.cameraConstants = m_Device->createBuffer(cameraConstantsBufferDesc);
+
+    nvrhi::BufferDesc randomDirectionsBufferDesc{};
+    randomDirectionsBufferDesc.byteSize = 1 * sizeof(DDGIConstants);
+    randomDirectionsBufferDesc.debugName = "Random Directions Buffer";
+    randomDirectionsBufferDesc.initialState = nvrhi::ResourceStates::ConstantBuffer;
+    randomDirectionsBufferDesc.keepInitialState = true;
+    randomDirectionsBufferDesc.isConstantBuffer = true;
+    randomDirectionsBufferDesc.isVolatile = true;
+    // randomDirectionsBufferDesc.structStride = sizeof(glm::vec3);
+
+    m_DDGIResources.ddgiConstants = m_Device->createBuffer(randomDirectionsBufferDesc);
+
+    // Pack mesh positions and globally rebased indices for ray-query hit lookup.
+    std::vector<glm::vec3> positions;
+    std::vector<uint32_t> indices;
+    std::vector<uint32_t> meshIndexOffsets;
+    for (const MeshData& mesh : m_Model.meshes) {
+      const uint32_t vertexOffset = static_cast<uint32_t>(positions.size());
+      meshIndexOffsets.push_back(static_cast<uint32_t>(indices.size()));
+      for (const Vertex& vertex : mesh.vertices) {
+        positions.push_back(vertex.position);
+      }
+      for (uint32_t index : mesh.indices) {
+        indices.push_back(vertexOffset + index);
+      }
+    }
+
+    // CollectDrawItems and CollectRayTracingInstances use the same node/mesh order.
+    std::vector<uint32_t> instanceIndexOffsets;
+    for (const MeshDrawItem& item : m_DrawItems) {
+      instanceIndexOffsets.push_back(meshIndexOffsets.at(item.meshIndex));
+    }
+
+    auto createSceneBuffer = [&](size_t byteSize, uint32_t stride, const char* name) {
+      nvrhi::BufferDesc bufferDesc{};
+      bufferDesc.byteSize = byteSize;
+      bufferDesc.structStride = stride;
+      bufferDesc.initialState = nvrhi::ResourceStates::ShaderResource;
+      bufferDesc.keepInitialState = true;
+      bufferDesc.debugName = name;
+      auto buffer = m_Device->createBuffer(bufferDesc);
+      if (!buffer) {
+        throw std::runtime_error(std::string("Failed to create ") + name);
+      }
+      return buffer;
+      };
+    m_DDGIResources.sceneVertexPositions = createSceneBuffer(
+      positions.size() * sizeof(glm::vec3), sizeof(glm::vec3), "DDGI Scene Positions");
+    m_DDGIResources.sceneIndices = createSceneBuffer(
+      indices.size() * sizeof(uint32_t), sizeof(uint32_t), "DDGI Scene Indices");
+    m_DDGIResources.instanceIndexOffsets = createSceneBuffer(
+      instanceIndexOffsets.size() * sizeof(uint32_t), sizeof(uint32_t), "DDGI Instance Index Offsets");
+
+    auto upload = m_Device->createCommandList();
+    upload->open();
+    upload->writeBuffer(m_DDGIResources.sceneVertexPositions, positions.data(), positions.size() * sizeof(glm::vec3));
+    upload->writeBuffer(m_DDGIResources.sceneIndices, indices.data(), indices.size() * sizeof(uint32_t));
+    upload->writeBuffer(m_DDGIResources.instanceIndexOffsets, instanceIndexOffsets.data(), instanceIndexOffsets.size() * sizeof(uint32_t));
+    upload->writeBuffer(m_DDGIResources.probePositions, probePositions.data(), probePositions.size() * sizeof(glm::vec3));
+    upload->close();
+    m_Device->executeCommandList(upload);
+
+    nvrhi::TextureDesc textureDesc{};
+    textureDesc.width = static_cast<uint32_t>(desc.probeCount.x * desc.probeCount.y * desc.probeCount.z);
+    textureDesc.height = desc.probeNumRays;
+    textureDesc.format = nvrhi::Format::RGBA16_FLOAT;
+    textureDesc.debugName = "Probe Radiance Distance Texture";
+    textureDesc.initialState = nvrhi::ResourceStates::UnorderedAccess;
+    textureDesc.keepInitialState = true;
+    textureDesc.dimension = nvrhi::TextureDimension::Texture2D;
+    textureDesc.isUAV = true;
+
+    m_DDGIResources.rayProbeRadianceDistance = m_Device->createTexture(textureDesc);
+
+    uint32_t probeIrradianceResolution = desc.probeIrradianceResolution;
+    nvrhi::TextureDesc probeGridIrradianceTextureDesc{};
+    probeGridIrradianceTextureDesc.width =
+      (probeIrradianceResolution + 2) *        // per probe irradiance quad with border for bilinear filtering
+      static_cast<uint32_t>(desc.probeCount.x * desc.probeCount.y); // linear probe tiles per row
+
+    probeGridIrradianceTextureDesc.height =
+      (probeIrradianceResolution + 2) *        // per probe irradiance quad with border for bilinear filtering
+      static_cast<uint32_t>(desc.probeCount.z);                     // probe volume Z dimension
+
+    probeGridIrradianceTextureDesc.format = nvrhi::Format::RGBA16_FLOAT;
+    probeGridIrradianceTextureDesc.debugName = "Probe Grid Irradiance TextureAtlas";
+    probeGridIrradianceTextureDesc.initialState = nvrhi::ResourceStates::UnorderedAccess;
+    probeGridIrradianceTextureDesc.keepInitialState = true;
+    probeGridIrradianceTextureDesc.dimension = nvrhi::TextureDimension::Texture2D;
+    probeGridIrradianceTextureDesc.isUAV = true;
+
+    m_DDGIResources.probeGridIrradiance[0] = m_Device->createTexture(probeGridIrradianceTextureDesc);
+    m_DDGIResources.probeGridIrradiance[1] = m_Device->createTexture(probeGridIrradianceTextureDesc);
+
+    uint32_t probeDistanceResolution = desc.probeDistanceResolution;
+    nvrhi::TextureDesc probeGridDistanceTextureDesc{};
+    probeGridDistanceTextureDesc.width =
+      (probeDistanceResolution + 2) *        // per probe distance quad with border for bilinear filtering
+      static_cast<uint32_t>(desc.probeCount.x * desc.probeCount.y); // linear probe tiles per row
+    probeGridDistanceTextureDesc.height =
+      (probeDistanceResolution + 2) *        // per probe distance quad with border for bilinear filtering
+      static_cast<uint32_t>(desc.probeCount.z);                   // probe volume Z dimension
+
+    probeGridDistanceTextureDesc.format = nvrhi::Format::RGBA16_FLOAT;
+    probeGridDistanceTextureDesc.debugName = "Probe Grid Distance TextureAtlas";
+    probeGridDistanceTextureDesc.initialState = nvrhi::ResourceStates::UnorderedAccess;
+    probeGridDistanceTextureDesc.keepInitialState = true;
+    probeGridDistanceTextureDesc.dimension = nvrhi::TextureDimension::Texture2D;
+    probeGridDistanceTextureDesc.isUAV = true;
+
+    m_DDGIResources.probeGridDistance[0] = m_Device->createTexture(probeGridDistanceTextureDesc);
+    m_DDGIResources.probeGridDistance[1] = m_Device->createTexture(probeGridDistanceTextureDesc);
+
+    if (!m_DDGIResources.rayProbeRadianceDistance || !m_DDGIResources.probeGridIrradiance[0] ||
+      !m_DDGIResources.probeGridIrradiance[1] || !m_DDGIResources.probeGridDistance[0] ||
+      !m_DDGIResources.probeGridDistance[1]) {
+      throw std::runtime_error("Failed to create DDGI textures");
+    }
+
+    auto clear = m_Device->createCommandList();
+    clear->open();
+    for (uint32_t atlas = 0; atlas < 2; ++atlas) {
+      clear->clearTextureFloat(m_DDGIResources.probeGridIrradiance[atlas], nvrhi::AllSubresources, nvrhi::Color(0.0f));
+      clear->clearTextureFloat(m_DDGIResources.probeGridDistance[atlas], nvrhi::AllSubresources, nvrhi::Color(0.0f));
+    }
+    clear->close();
+    m_Device->executeCommandList(clear);
+
+  }
+
+  void DDGIExperiment::InitializeDDGIBindings(DDGIVolumeDesc desc)
+  {
+    nvrhi::BindingLayoutDesc probeVisualizationLayoutDesc{};
+    probeVisualizationLayoutDesc.visibility = nvrhi::ShaderType::Mesh | nvrhi::ShaderType::Pixel;
+    probeVisualizationLayoutDesc.bindings = {
+       nvrhi::BindingLayoutItem::StructuredBuffer_SRV(0),
+       nvrhi::BindingLayoutItem::VolatileConstantBuffer(1),
+       nvrhi::BindingLayoutItem::VolatileConstantBuffer(0),
+       nvrhi::BindingLayoutItem::Texture_UAV(0)
+    };
+
+    nvrhi::BindingLayoutDesc probeRayTracingLayoutDesc{};
+    probeRayTracingLayoutDesc.visibility = nvrhi::ShaderType::All;
+    probeRayTracingLayoutDesc.bindings = {
+       nvrhi::BindingLayoutItem::RayTracingAccelStruct(0),
+       nvrhi::BindingLayoutItem::StructuredBuffer_SRV(1),
+       nvrhi::BindingLayoutItem::StructuredBuffer_SRV(2),
+       nvrhi::BindingLayoutItem::StructuredBuffer_SRV(3),
+       nvrhi::BindingLayoutItem::StructuredBuffer_SRV(4),
+       nvrhi::BindingLayoutItem::VolatileConstantBuffer(0),
+       nvrhi::BindingLayoutItem::Texture_UAV(0),
+    };
+
+    m_DDGIResources.probeRayTracingLayout = m_Device->createBindingLayout(probeRayTracingLayoutDesc);
+
+    m_DDGIResources.probeVisualizationLayout = m_Device->createBindingLayout(probeVisualizationLayoutDesc);
+
+    if (!m_DDGIResources.probeVisualizationLayout) {
+      throw std::runtime_error("Failed to create probe visualization binding layout");
+    }
+
+    for (uint32_t atlas = 0; atlas < 2; ++atlas) {
+      nvrhi::BindingSetDesc probeVisualizationBindingSet{};
+      probeVisualizationBindingSet.bindings = {
+        { nvrhi::BindingSetItem::StructuredBuffer_SRV(0, m_DDGIResources.probePositions) },
+        { nvrhi::BindingSetItem::ConstantBuffer(0, m_DDGIResources.cameraConstants) },
+        { nvrhi::BindingSetItem::ConstantBuffer(1, m_DDGIResources.ddgiConstants) },
+        { nvrhi::BindingSetItem::Texture_UAV(0, m_DDGIResources.probeGridIrradiance[atlas]) }
+      };
+      m_DDGIResources.probeVisualizationBindingSet[atlas] = m_Device->createBindingSet(
+        probeVisualizationBindingSet, m_DDGIResources.probeVisualizationLayout);
+      if (!m_DDGIResources.probeVisualizationBindingSet[atlas]) {
+        throw std::runtime_error("Failed to create probe visualization binding set");
+      }
+    }
+
+    nvrhi::BindingSetDesc probeRayTracingBindingSet{};
+    probeRayTracingBindingSet.bindings = {
+      { nvrhi::BindingSetItem::RayTracingAccelStruct(0, m_RayTracingScene.GetTLAS()) },
+      { nvrhi::BindingSetItem::StructuredBuffer_SRV(1, m_DDGIResources.probePositions) },
+      { nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_DDGIResources.sceneVertexPositions) },
+      { nvrhi::BindingSetItem::StructuredBuffer_SRV(3, m_DDGIResources.sceneIndices) },
+      { nvrhi::BindingSetItem::StructuredBuffer_SRV(4, m_DDGIResources.instanceIndexOffsets) },
+      { nvrhi::BindingSetItem::ConstantBuffer(0, m_DDGIResources.ddgiConstants) },
+      { nvrhi::BindingSetItem::Texture_UAV(0, m_DDGIResources.rayProbeRadianceDistance) }
+    };
+
+    m_DDGIResources.probeRayTracingBindingSet = m_Device->createBindingSet(probeRayTracingBindingSet, m_DDGIResources.probeRayTracingLayout);
+
+    if (!m_DDGIResources.probeRayTracingBindingSet) {
+      throw std::runtime_error("Failed to create probe irradiance update binding set");
+    }
+    nvrhi::BindingLayoutDesc probeUpdateLayoutDesc{};
+    probeUpdateLayoutDesc.visibility = nvrhi::ShaderType::Compute;
+    probeUpdateLayoutDesc.bindings = {
+      nvrhi::BindingLayoutItem::VolatileConstantBuffer(0),
+      nvrhi::BindingLayoutItem::Texture_UAV(0),
+      nvrhi::BindingLayoutItem::Texture_UAV(1),
+      nvrhi::BindingLayoutItem::Texture_UAV(2)
+    };
+    m_DDGIResources.probeIrradianceUpdateLayout = m_Device->createBindingLayout(probeUpdateLayoutDesc);
+    if (!m_DDGIResources.probeRayTracingLayout || !m_DDGIResources.probeIrradianceUpdateLayout) {
+      throw std::runtime_error("Failed to create DDGI compute binding layouts");
+    }
+
+    for (uint32_t atlas = 0; atlas < 2; ++atlas) {
+      for (uint32_t pass = 0; pass < 2; ++pass) {
+        auto previous = pass == 0 ? m_DDGIResources.probeGridIrradiance[atlas] : m_DDGIResources.probeGridDistance[atlas];
+        auto next = pass == 0 ? m_DDGIResources.probeGridIrradiance[1 - atlas] : m_DDGIResources.probeGridDistance[1 - atlas];
+        nvrhi::BindingSetDesc probeUpdateBindingSet{};
+        probeUpdateBindingSet.bindings = {
+          { nvrhi::BindingSetItem::ConstantBuffer(0, m_DDGIResources.ddgiConstants) },
+          { nvrhi::BindingSetItem::Texture_UAV(0, previous) },
+          { nvrhi::BindingSetItem::Texture_UAV(1, m_DDGIResources.rayProbeRadianceDistance) },
+          { nvrhi::BindingSetItem::Texture_UAV(2, next) }
+        };
+        auto bindingSet = m_Device->createBindingSet(probeUpdateBindingSet, m_DDGIResources.probeIrradianceUpdateLayout);
+        if (!bindingSet) {
+          throw std::runtime_error("Failed to create probe update binding set");
+        }
+        if (pass == 0) {
+          m_DDGIResources.probeIrradianceUpdateBindingSet[atlas] = bindingSet;
+        }
+        else {
+          m_DDGIResources.probeVisibilityUpdateBindingSet[atlas] = bindingSet;
+        }
+      }
+    }
+  }
+
+  void DDGIExperiment::InitDDGIPipeline(const nvrhi::FramebufferInfo& outputInfo)
+  {
+    const auto ddgiMsBytes = ReadBinary(ISKRA_SHADER_DIR "/ProbeVisualization.ms.dxil");
+    const auto ddgiPsBytes = ReadBinary(ISKRA_SHADER_DIR "/ProbeVisualization.ps.dxil");
+    const auto ddgiProbeRayTracingBytes = ReadBinary(ISKRA_SHADER_DIR "/DDGIProbeRayTracing.cs.dxil");
+
+    nvrhi::ShaderDesc ddgiPsDesc{};
+    ddgiPsDesc.shaderType = nvrhi::ShaderType::Pixel;
+    ddgiPsDesc.debugName = "ProbeVisualization.ps";
+    ddgiPsDesc.entryName = "PSMain";
+
+    nvrhi::ShaderDesc ddgiMsDesc{};
+    ddgiMsDesc.shaderType = nvrhi::ShaderType::Mesh;
+    ddgiMsDesc.debugName = "ProbeVisualization.ms";
+    ddgiMsDesc.entryName = "MSMain";
+
+    nvrhi::ShaderDesc ddgiProbeRayTracingDesc{};
+    ddgiProbeRayTracingDesc.shaderType = nvrhi::ShaderType::Compute;
+    ddgiProbeRayTracingDesc.debugName = "ProbeRayTracing.cs";
+    ddgiProbeRayTracingDesc.entryName = "CSMain";
+
+    m_DDGIResources.probeVisualizationMeshShader = m_Device->createShader(ddgiMsDesc, ddgiMsBytes.data(), ddgiMsBytes.size());
+    m_DDGIResources.probeVisualizationPixelShader = m_Device->createShader(ddgiPsDesc, ddgiPsBytes.data(), ddgiPsBytes.size());
+    m_DDGIResources.probeRayTracingComputeShader = m_Device->createShader(ddgiProbeRayTracingDesc, ddgiProbeRayTracingBytes.data(), ddgiProbeRayTracingBytes.size());
+
+    if (!m_DDGIResources.probeVisualizationMeshShader || !m_DDGIResources.probeVisualizationPixelShader) {
+      throw std::runtime_error("Failed to create probe visualization shaders");
+    }
+
+    if (!m_DDGIResources.probeRayTracingComputeShader) {
+      throw std::runtime_error("Failed to create probe ray tracing compute shader");
+    }
+
+    nvrhi::MeshletPipelineDesc probeVisualizationPipelineDesc{};
+    probeVisualizationPipelineDesc.primType = nvrhi::PrimitiveType::TriangleList;
+    probeVisualizationPipelineDesc.MS = m_DDGIResources.probeVisualizationMeshShader;
+    probeVisualizationPipelineDesc.PS = m_DDGIResources.probeVisualizationPixelShader;
+    probeVisualizationPipelineDesc.renderState.rasterState.cullMode = nvrhi::RasterCullMode::None;
+    probeVisualizationPipelineDesc.renderState.depthStencilState.depthTestEnable = true;
+    probeVisualizationPipelineDesc.renderState.depthStencilState.depthWriteEnable = true;
+    probeVisualizationPipelineDesc.renderState.depthStencilState.stencilEnable = false;
+
+    auto& probeDepth = probeVisualizationPipelineDesc.renderState.depthStencilState;
+    probeDepth.depthTestEnable = true;
+    probeDepth.depthWriteEnable = true;
+    probeDepth.depthFunc = nvrhi::ComparisonFunc::Less;
+
+    probeVisualizationPipelineDesc.addBindingLayout(m_DDGIResources.probeVisualizationLayout);
+    m_DDGIResources.probeVisualizationPipeline = m_Device->createMeshletPipeline(probeVisualizationPipelineDesc, outputInfo);
+
+    if (!m_DDGIResources.probeVisualizationPipeline) {
+      throw std::runtime_error("Failed to create probe visualization pipeline");
+    }
+
+    nvrhi::ComputePipelineDesc probeRayTracingPipelineDesc{};
+    probeRayTracingPipelineDesc.CS = m_DDGIResources.probeRayTracingComputeShader;
+    probeRayTracingPipelineDesc.addBindingLayout(m_DDGIResources.probeRayTracingLayout);
+    probeRayTracingPipelineDesc.addBindingLayout(m_AssetRegistry.GetBindlessTextureBindingLayout());
+
+    m_DDGIResources.probeRayTracingPipeline = m_Device->createComputePipeline(probeRayTracingPipelineDesc);
+
+    if (!m_DDGIResources.probeRayTracingPipeline) {
+      throw std::runtime_error("Failed to create probe irradiance update pipeline");
+    }
+    const auto probeUpdateBytes = ReadBinary(ISKRA_SHADER_DIR "/DDGIProbeIrradianceVisibilityUpdate.cs.dxil");
+    nvrhi::ShaderDesc probeUpdateDesc{};
+    probeUpdateDesc.shaderType = nvrhi::ShaderType::Compute;
+    probeUpdateDesc.debugName = "DDGIProbeIrradianceVisibilityUpdate.cs";
+    probeUpdateDesc.entryName = "CSMain";
+    m_DDGIResources.probeIrradianceUpdateComputeShader = m_Device->createShader(
+      probeUpdateDesc, probeUpdateBytes.data(), probeUpdateBytes.size());
+    if (!m_DDGIResources.probeIrradianceUpdateComputeShader) {
+      throw std::runtime_error("Failed to create probe update compute shader");
+    }
+
+    nvrhi::ComputePipelineDesc probeUpdatePipelineDesc{};
+    probeUpdatePipelineDesc.CS = m_DDGIResources.probeIrradianceUpdateComputeShader;
+    probeUpdatePipelineDesc.addBindingLayout(m_DDGIResources.probeIrradianceUpdateLayout);
+    m_DDGIResources.probeIrradianceUpdatePipeline = m_Device->createComputePipeline(probeUpdatePipelineDesc);
+    if (!m_DDGIResources.probeIrradianceUpdatePipeline) {
+      throw std::runtime_error("Failed to create probe update pipeline");
     }
   }
 
