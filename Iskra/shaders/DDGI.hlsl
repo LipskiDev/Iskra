@@ -8,6 +8,8 @@ struct VertexInput
   float3 position : POSITION;
   float3 normal : COLOR;
   float2 uv : TEXCOORD0;
+  float3 tangent : TANGENT;
+  float3 bitangent : BITANGENT;
 };
 
 struct VertexOutput
@@ -16,6 +18,8 @@ struct VertexOutput
   float3 worldPosition : TEXCOORD0;
   float3 worldNormal : TEXCOORD1;
   float2 uv : TEXCOORD2;
+  float3 tangent : TANGENT;
+  float3 bitangent : BITANGENT;
 };
 
 SamplerState BasicSampler : register(s0);
@@ -71,6 +75,8 @@ VertexOutput VSMain(VertexInput input)
   output.worldPosition = worldPosition.xyz;
   output.worldNormal = mul(normalMatrix, float4(input.normal, 0.0f)).xyz;
   output.uv = input.uv;
+  output.tangent = mul(normalMatrix, float4(input.tangent, 0.0f)).xyz;
+  output.bitangent = mul(normalMatrix, float4(input.bitangent, 0.0f)).xyz;
 
   return output;
 }
@@ -206,8 +212,20 @@ float3 ComputeIndirectLighting(float3 worldPosition, float3 normal)
 
 float4 PSMain(VertexOutput input) : SV_Target
 {
-  float3 N = normalize(input.worldNormal);
+  Material mat = materials[materialIndex];
+  float3 geometricNormal = normalize(input.worldNormal);
+  float3 T = normalize(input.tangent - geometricNormal * dot(input.tangent, geometricNormal));
+  float handedness = dot(cross(geometricNormal, T), input.bitangent) < 0.0f ? -1.0f : 1.0f;
+  float3 B = normalize(cross(geometricNormal, T)) * handedness;
 
+  float3 tangentNormal = textures[mat.normalTextureIndex].Sample(BasicSampler, input.uv).rgb;
+  tangentNormal = tangentNormal * 2.0f - 1.0f;
+
+  float3 N = normalize(
+    tangentNormal.x * T +
+    tangentNormal.y * B +
+    tangentNormal.z * geometricNormal);
+    
   float3 L = normalize(surfaceToLight);
 
   float NdotL = saturate(dot(N, L));
@@ -218,7 +236,6 @@ float4 PSMain(VertexOutput input) : SV_Target
     visibility = TraceVisibility(input.worldPosition, N, L);
   }
   
-  Material mat = materials[materialIndex];
 
   float4 base = textures[mat.baseColorTextureIndex].Sample(BasicSampler, input.uv);
   float alpha = base.a;
@@ -242,7 +259,5 @@ float4 PSMain(VertexOutput input) : SV_Target
     return float4(indirectLight, 1.0f);
   }
 
-  //return float4(indirectLight, 1.0f);
-  return float4(directLight + indirectLight, 1.0f);
-
+    return float4(directLight + indirectLight, 1.0f);
 }

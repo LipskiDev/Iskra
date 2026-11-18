@@ -87,7 +87,7 @@ namespace Iskra {
   {
     Assimp::Importer importer;
 
-    const unsigned int flags = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_GenSmoothNormals | aiProcess_SortByPType;
+    const unsigned int flags = aiProcess_Triangulate | aiProcess_JoinIdenticalVertices | aiProcess_GenSmoothNormals | aiProcess_SortByPType | aiProcess_CalcTangentSpace;
 
     const aiScene* scene = importer.ReadFile(path.string(), flags);
 
@@ -175,8 +175,13 @@ namespace Iskra {
 
       if (mesh.HasTextureCoords(0)) {
         const auto& uv = mesh.mTextureCoords[0][i];
-        vertex.uv = { uv.x, uv.y };
+        vertex.uv = { uv.x, 1.0 - uv.y };
       }
+
+	  if (mesh.HasTangentsAndBitangents()) {
+		  vertex.tangent = glm::vec3(mesh.mTangents[i].x, mesh.mTangents[i].y, mesh.mTangents[i].z);
+		  vertex.bitangent = glm::vec3(mesh.mBitangents[i].x, mesh.mBitangents[i].y, mesh.mBitangents[i].z);
+	  }
       
       meshData.vertices.push_back(vertex);
     }

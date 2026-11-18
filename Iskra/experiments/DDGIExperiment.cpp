@@ -248,28 +248,38 @@ namespace Iskra {
     depth.depthFunc = nvrhi::ComparisonFunc::Less;
     depth.stencilEnable = false;
 
-    nvrhi::VertexAttributeDesc vertexAttributes[3]{};
+    nvrhi::VertexAttributeDesc vertexAttributes[5]{};
     vertexAttributes[0].name = "POSITION";
     vertexAttributes[1].name = "COLOR";
     vertexAttributes[2].name = "TEXCOORD";
+    vertexAttributes[3].name = "TANGENT";
+    vertexAttributes[4].name = "BITANGENT";
 
     vertexAttributes[0].format = nvrhi::Format::RGB32_FLOAT;
     vertexAttributes[1].format = nvrhi::Format::RGB32_FLOAT;
     vertexAttributes[2].format = nvrhi::Format::RG32_FLOAT;
+	vertexAttributes[3].format = nvrhi::Format::RGB32_FLOAT;
+	vertexAttributes[4].format = nvrhi::Format::RGB32_FLOAT;
 
     vertexAttributes[0].offset = 0;
     vertexAttributes[1].offset = offsetof(Vertex, normal);
     vertexAttributes[2].offset = offsetof(Vertex, uv);
+	vertexAttributes[3].offset = offsetof(Vertex, tangent);
+	vertexAttributes[4].offset = offsetof(Vertex, bitangent);
 
     vertexAttributes[0].elementStride = sizeof(Vertex);
     vertexAttributes[1].elementStride = sizeof(Vertex);
     vertexAttributes[2].elementStride = sizeof(Vertex);
+	vertexAttributes[3].elementStride = sizeof(Vertex);
+	vertexAttributes[4].elementStride = sizeof(Vertex);
 
     vertexAttributes[0].bufferIndex = 0;
     vertexAttributes[1].bufferIndex = 0;
     vertexAttributes[2].bufferIndex = 0;
+	vertexAttributes[3].bufferIndex = 0;
+	vertexAttributes[4].bufferIndex = 0;
 
-    auto inputLayout = m_Device->createInputLayout(vertexAttributes, 3, vertexShader);
+    auto inputLayout = m_Device->createInputLayout(vertexAttributes, 5, vertexShader);
 
     pipelineDesc.addBindingLayout(m_BindingLayout);
     pipelineDesc.addBindingLayout(m_DDGIResources.indirectSamplingLayout);
