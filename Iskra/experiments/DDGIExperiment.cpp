@@ -51,8 +51,22 @@ namespace Iskra {
     m_AssetRegistry.Initialize(m_Device, nullptr);
     LoadScene();
     m_AssetRegistry.UpdateResourcesIfDirty();
+
+    InitializeDDGI(DDGIVolumeDesc{
+        "DDGI Volume",
+        glm::vec3(0.0f, 5.0f, 0.0f),
+        glm::vec3(10.0f, 8.0f, 10.0f),
+        true,
+        glm::vec3(8, 8, 8),
+        0.97f,
+        1e27f,
+        128,
+        6
+      }, framebufferInfo);
+
     CreateBindings();
     CreatePipeline(framebufferInfo);
+
   }
 
   void DDGIExperiment::LoadScene()
@@ -103,12 +117,73 @@ namespace Iskra {
     if (!m_ConstantBuffer) {
       throw std::runtime_error("Failed to create mesh constant buffer");
     }
+    
+    nvrhi::BufferDesc debugConstantsBufferDesc{};
+    debugConstantsBufferDesc.byteSize = sizeof(DebugConstants);
+    debugConstantsBufferDesc.debugName = "Debug Constants Buffer";
+    debugConstantsBufferDesc.isConstantBuffer = true;
+    debugConstantsBufferDesc.initialState = nvrhi::ResourceStates::ConstantBuffer;
+    debugConstantsBufferDesc.keepInitialState = true;
+    debugConstantsBufferDesc.isVolatile = true;
+
+    m_DDGIResources.debugConstants = m_Device->createBuffer(debugConstantsBufferDesc);
+
+    if (m_DDGIResources.debugConstants == nullptr)
+    {
+      throw std::runtime_error("Failed to create debug constants buffer");
+    }
+
+    nvrhi::BindingLayoutDesc indirectSamplingLayoutDesc{};
+    indirectSamplingLayoutDesc.visibility = nvrhi::ShaderType::Pixel;
+    indirectSamplingLayoutDesc.bindings = {
+       nvrhi::BindingLayoutItem::Texture_UAV(0),
+       nvrhi::BindingLayoutItem::Texture_UAV(1),
+    };
+
+    m_DDGIResources.indirectSamplingLayout = m_Device->createBindingLayout(indirectSamplingLayoutDesc);
+
+    if (m_DDGIResources.indirectSamplingLayout == nullptr)
+    {
+      throw std::runtime_error("Failed to create indirect sampling binding layout");
+    }
+
+    nvrhi::BindingSetDesc indirectSamplingBindingSetDesc;
+    indirectSamplingBindingSetDesc.bindings = {
+      { nvrhi::BindingSetItem::Texture_UAV(0, m_DDGIResources.probeGridIrradiance[0]) },
+      { nvrhi::BindingSetItem::Texture_UAV(1, m_DDGIResources.probeGridDistance[0]) }
+    };
+
+    m_DDGIResources.indirectSamplingBindingSet[0] = m_Device->createBindingSet(indirectSamplingBindingSetDesc, m_DDGIResources.indirectSamplingLayout);
+
+    indirectSamplingBindingSetDesc.bindings = {
+      { nvrhi::BindingSetItem::Texture_UAV(0, m_DDGIResources.probeGridIrradiance[1]) },
+      { nvrhi::BindingSetItem::Texture_UAV(1, m_DDGIResources.probeGridDistance[1]) }
+    };
+
+    m_DDGIResources.indirectSamplingBindingSet[1] = m_Device->createBindingSet(indirectSamplingBindingSetDesc, m_DDGIResources.indirectSamplingLayout);
+
+    if (m_DDGIResources.indirectSamplingBindingSet[0] == nullptr || m_DDGIResources.indirectSamplingBindingSet[1] == nullptr)
+    {
+      throw std::runtime_error("Failed to create indirect sampling binding set");
+    }
+
+    nvrhi::SamplerDesc samplerDesc;
+    samplerDesc.setAllFilters(true);
+    samplerDesc.setAllAddressModes(nvrhi::SamplerAddressMode::Wrap);
+    m_MaterialSampler = m_Device->createSampler(samplerDesc);
+    if (!m_MaterialSampler) {
+      throw std::runtime_error("Failed to create material sampler");
+    }
 
     nvrhi::BindingLayoutDesc bindingLayoutDesc{};
     bindingLayoutDesc.visibility = nvrhi::ShaderType::AllGraphics;
     bindingLayoutDesc.bindings = {
        nvrhi::BindingLayoutItem::VolatileConstantBuffer(0),
-        nvrhi::BindingLayoutItem::RayTracingAccelStruct(0)
+       nvrhi::BindingLayoutItem::VolatileConstantBuffer(1),
+       nvrhi::BindingLayoutItem::VolatileConstantBuffer(2),
+       nvrhi::BindingLayoutItem::ConstantBuffer(3),
+       nvrhi::BindingLayoutItem::Sampler(0),
+       nvrhi::BindingLayoutItem::RayTracingAccelStruct(0),
     };
 
     m_BindingLayout = m_Device->createBindingLayout(bindingLayoutDesc);
@@ -120,6 +195,10 @@ namespace Iskra {
     nvrhi::BindingSetDesc bindingSetDesc{};
     bindingSetDesc.bindings = {
       { nvrhi::BindingSetItem::ConstantBuffer(0, m_ConstantBuffer) },
+      { nvrhi::BindingSetItem::ConstantBuffer(1, m_DDGIResources.ddgiConstants) },
+      { nvrhi::BindingSetItem::ConstantBuffer(2, m_DDGIResources.debugConstants) },
+      { nvrhi::BindingSetItem::ConstantBuffer(3, m_AssetRegistry.GetMaterialBuffer()) },
+      { nvrhi::BindingSetItem::Sampler(0, m_MaterialSampler) },
       { nvrhi::BindingSetItem::RayTracingAccelStruct(0, m_RayTracingScene.GetTLAS()) }
     };
 
@@ -169,25 +248,32 @@ namespace Iskra {
     depth.depthFunc = nvrhi::ComparisonFunc::Less;
     depth.stencilEnable = false;
 
-    nvrhi::VertexAttributeDesc vertexAttributes[2]{};
+    nvrhi::VertexAttributeDesc vertexAttributes[3]{};
     vertexAttributes[0].name = "POSITION";
     vertexAttributes[1].name = "COLOR";
+    vertexAttributes[2].name = "TEXCOORD";
 
     vertexAttributes[0].format = nvrhi::Format::RGB32_FLOAT;
     vertexAttributes[1].format = nvrhi::Format::RGB32_FLOAT;
+    vertexAttributes[2].format = nvrhi::Format::RG32_FLOAT;
 
     vertexAttributes[0].offset = 0;
     vertexAttributes[1].offset = offsetof(Vertex, normal);
+    vertexAttributes[2].offset = offsetof(Vertex, uv);
 
     vertexAttributes[0].elementStride = sizeof(Vertex);
     vertexAttributes[1].elementStride = sizeof(Vertex);
+    vertexAttributes[2].elementStride = sizeof(Vertex);
 
     vertexAttributes[0].bufferIndex = 0;
     vertexAttributes[1].bufferIndex = 0;
+    vertexAttributes[2].bufferIndex = 0;
 
-    auto inputLayout = m_Device->createInputLayout(vertexAttributes, 2, vertexShader);
+    auto inputLayout = m_Device->createInputLayout(vertexAttributes, 3, vertexShader);
 
     pipelineDesc.addBindingLayout(m_BindingLayout);
+    pipelineDesc.addBindingLayout(m_DDGIResources.indirectSamplingLayout);
+    pipelineDesc.addBindingLayout(m_AssetRegistry.GetBindlessTextureBindingLayout());
 
     pipelineDesc.inputLayout = inputLayout;
 
@@ -200,6 +286,12 @@ namespace Iskra {
 
   void DDGIExperiment::RenderGeometry(const FrameContext& frame)
   {
+    DDGIConstants ddgiConstants{};
+    ddgiConstants.probeGridOrigin = m_DDGIResources.desc.center - m_DDGIResources.desc.halfSize;
+    ddgiConstants.probeGridSpacing = 2.0f * m_DDGIResources.desc.halfSize / m_DDGIResources.desc.probeCount;
+    ddgiConstants.probeGridSize = m_DDGIResources.desc.probeCount;
+    frame.commandList->writeBuffer(m_DDGIResources.ddgiConstants, &ddgiConstants, sizeof(ddgiConstants));
+
     for (const MeshDrawItem& item : m_DrawItems) {
       ConstantBufferData constants{};
       constants.model = item.worldTransform;
@@ -207,14 +299,24 @@ namespace Iskra {
       constants.projection = m_Camera.GetProjectionMatrix();
       constants.normalMatrix = glm::transpose(glm::inverse(item.worldTransform));
       constants.toLight = m_ToLight;
+      constants.cameraPosition = m_Camera.GetPosition();
+      constants.materialIndex = item.materialIndex;
 
       frame.commandList->writeBuffer(
         m_ConstantBuffer, &constants, sizeof(constants));
+
+      DebugConstants debugMode{};
+      int debug = 0;
+      debug = debug | (m_UseDDGI ? 0 : 1);
+      debug = debug | (m_ShowIndirectLighting ? 2 : 0);
+      frame.commandList->writeBuffer(m_DDGIResources.debugConstants, &debug, sizeof(debug));
 
       nvrhi::GraphicsState state{};
       state.pipeline = m_Pipeline.Get();
       state.framebuffer = frame.framebuffer;
       state.addBindingSet(m_BindingSet);
+      state.addBindingSet(m_DDGIResources.indirectSamplingBindingSet[m_DDGIResources.currentProbeAtlas]);
+      state.addBindingSet(m_AssetRegistry.GetBindlessTextureDescriptorTable());
       state.viewport.addViewportAndScissorRect(
         frame.framebuffer->getFramebufferInfo().getViewport());
 
@@ -667,6 +769,7 @@ namespace Iskra {
   void DDGIExperiment::OnUpdate(float deltaTime)
   {
     m_CameraController.OnUpdate(deltaTime);
+    m_AssetRegistry.UpdateResourcesIfDirty();
     m_ToLight = glm::vec3(
       cos(m_SunElevation) * sin(m_SunAzimuth),
       sin(m_SunElevation),
@@ -691,6 +794,10 @@ namespace Iskra {
       nvrhi::Color(0.15f, 0.12f, 0.20f, 1.0f));
 
     RenderGeometry(frame);
+    UpdateProbeIrradiances(frame);
+    if (m_ShowProbes)
+      RenderProbeVisualization(frame);
+
   }
 
   void DDGIExperiment::OnUiRender(FrameContext& frame)
@@ -702,6 +809,10 @@ namespace Iskra {
     ImGui::SliderAngle("Sun elevation", &m_SunElevation, 1.0f, 89.0f);
     ImGui::Text("Direction: %.2f, %.2f, %.2f", m_ToLight.x, m_ToLight.y, m_ToLight.z);
     ImGui::Text("%.1f FPS", ImGui::GetIO().Framerate);
+    // Checkbox to enable and disable the probe visualization
+    ImGui::Checkbox("Show probes", &m_ShowProbes);
+    ImGui::Checkbox("Use DDGI", &m_UseDDGI);
+    ImGui::Checkbox("Show Indirect Lighting", &m_ShowIndirectLighting);
     ImGui::End();
   }
 
