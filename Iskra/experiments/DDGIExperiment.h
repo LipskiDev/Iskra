@@ -46,8 +46,10 @@ namespace Iskra {
     nvrhi::BufferHandle ddgiConstants;
     nvrhi::BufferHandle debugConstants;
     nvrhi::BufferHandle sceneVertexPositions;
+    nvrhi::BufferHandle sceneVertexUVs;
     nvrhi::BufferHandle sceneIndices;
     nvrhi::BufferHandle instanceIndexOffsets;
+    nvrhi::BufferHandle instanceMaterialIndices;
 
     nvrhi::TextureHandle rayProbeRadianceDistance;
     nvrhi::TextureHandle probeGridIrradiance[2];
@@ -58,7 +60,7 @@ namespace Iskra {
     nvrhi::BindingSetHandle probeVisualizationBindingSet[2];
 
     nvrhi::BindingLayoutHandle probeRayTracingLayout;
-    nvrhi::BindingSetHandle probeRayTracingBindingSet;
+    nvrhi::BindingSetHandle probeRayTracingBindingSet[2];
 
     nvrhi::BindingLayoutHandle indirectSamplingLayout;
     nvrhi::BindingSetHandle indirectSamplingBindingSet[2];
@@ -104,6 +106,7 @@ namespace Iskra {
     void RenderGeometry(const FrameContext& frame);
     void RenderProbeVisualization(const FrameContext& frame);
     void UpdateProbeIrradiances(const FrameContext& frame);
+    void ResetProbeHistory(const FrameContext& frame);
 
     // DDGI
     void InitializeDDGI(DDGIVolumeDesc desc,const nvrhi::FramebufferInfo& outputInfo);
@@ -111,6 +114,9 @@ namespace Iskra {
     void InitializeDDGIBindings(DDGIVolumeDesc desc);
     void InitDDGIPipeline(const nvrhi::FramebufferInfo& outputInfo);
     DDGIResources m_DDGIResources;
+    bool m_ProbePositionsDirty = false;
+    bool m_ProbeResourcesDirty = false;
+    bool m_ResetProbeHistory = false;
 
     Camera m_Camera;
     FlyingCameraController m_CameraController;
@@ -150,6 +156,8 @@ namespace Iskra {
       glm::vec3 probeGridSpacing;
       float padding = 0.0f;
       glm::vec3 probeGridSize;
+      float gridSizePadding = 0.0f;
+      glm::vec4 lightColor;
     };
 
     struct DDGIUpdateConstants {
@@ -164,6 +172,7 @@ namespace Iskra {
 
     float m_SunAzimuth = glm::radians(-124.0f);
     float m_SunElevation = glm::radians(70.0f);
+    glm::vec3 m_LightColor = { 1.0f, 1.0f, 1.0f };
     bool m_UseDDGI = true;
     bool m_ShowIndirectLighting = false;
     bool m_ShowProbes = false;

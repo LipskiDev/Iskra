@@ -15,6 +15,7 @@ cbuffer DDGIConstants : register(DDGI_CONSTANTS_REGISTER)
   float3 probeGridOrigin;
   float3 probeGridSpacing;
   float3 probeGridSize;
+  float4 lightColor;
 }
 
 
@@ -71,6 +72,19 @@ float2 normalizedOctahedralCoordinates(int2 fragCoord, uint probeSideLength)
 }
 
 static const float PI = 3.14159265359f;
+// The swapchain is UNORM, so screen outputs must explicitly encode linear light.
+// Never apply this to radiance or irradiance stored in the probe atlases.
+float3 LinearToSRGB(float3 linearColor)
+{
+  linearColor = max(linearColor, 0.0f);
+  float3 low = 12.92f * linearColor;
+  float3 high = 1.055f * pow(linearColor, 1.0f / 2.4f) - 0.055f;
+  return float3(
+    linearColor.x <= 0.0031308f ? low.x : high.x,
+    linearColor.y <= 0.0031308f ? low.y : high.y,
+    linearColor.z <= 0.0031308f ? low.z : high.z);
+}
+
 static const float GOLDEN_ANGLE = 2.39996322972865332f; // 2 * PI * (1 - 1 / PHI)
 
 float3 FibonacciSphere(

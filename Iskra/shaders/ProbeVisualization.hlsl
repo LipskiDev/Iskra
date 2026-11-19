@@ -110,5 +110,5 @@ void PSMain(VertexOutput input, out float4 color : SV_Target)
   uint probesPerRow = width / tileSide;
   uint2 tile = uint2(input.probeIndex % probesPerRow, input.probeIndex / probesPerRow);
   uint2 texel = OctahedralTexel(normalize(input.normal), irradianceQuadSize, irradianceQuadSize);
-  color = float4(probeIrradiance[tile * tileSide + 1 + texel].rgb, 1.0f);
+  color = float4(LinearToSRGB(probeIrradiance[tile * tileSide + 1 + texel].rgb), 1.0f);
 }

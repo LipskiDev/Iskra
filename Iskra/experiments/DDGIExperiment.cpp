@@ -12,8 +12,30 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <glm/ext/scalar_constants.hpp>
 
 namespace {
+
+  std::vector<glm::vec3> BuildProbePositions(const Iskra::DDGIVolumeDesc& desc)
+  {
+    glm::vec3 volumeCenter = desc.center;
+    glm::vec3 volumeExtents = desc.halfSize;
+    std::vector<glm::vec3> probePositions;
+
+    for (int x = 0; x < desc.probeCount.x; ++x) {
+      for (int y = 0; y < desc.probeCount.y; ++y) {
+        for (int z = 0; z < desc.probeCount.z; ++z) {
+          glm::vec3 probePos = volumeCenter + glm::vec3(
+            (x + 0.5f) / desc.probeCount.x * 2.0f * volumeExtents.x - volumeExtents.x,
+            (y + 0.5f) / desc.probeCount.y * 2.0f * volumeExtents.y - volumeExtents.y,
+            (z + 0.5f) / desc.probeCount.z * 2.0f * volumeExtents.z - volumeExtents.z);
+          probePositions.push_back(probePos);
+        }
+      }
+    }
+
+    return probePositions;
+  }
 
   std::vector<char> ReadBinary(const char* path)
   {
@@ -51,6 +73,14 @@ namespace Iskra {
     m_AssetRegistry.Initialize(m_Device, nullptr);
     LoadScene();
     m_AssetRegistry.UpdateResourcesIfDirty();
+
+    nvrhi::SamplerDesc samplerDesc;
+    samplerDesc.setAllFilters(true);
+    samplerDesc.setAllAddressModes(nvrhi::SamplerAddressMode::Wrap);
+    m_MaterialSampler = m_Device->createSampler(samplerDesc);
+    if (!m_MaterialSampler) {
+      throw std::runtime_error("Failed to create material sampler");
+    }
 
     InitializeDDGI(DDGIVolumeDesc{
         "DDGI Volume",
@@ -165,14 +195,6 @@ namespace Iskra {
     if (m_DDGIResources.indirectSamplingBindingSet[0] == nullptr || m_DDGIResources.indirectSamplingBindingSet[1] == nullptr)
     {
       throw std::runtime_error("Failed to create indirect sampling binding set");
-    }
-
-    nvrhi::SamplerDesc samplerDesc;
-    samplerDesc.setAllFilters(true);
-    samplerDesc.setAllAddressModes(nvrhi::SamplerAddressMode::Wrap);
-    m_MaterialSampler = m_Device->createSampler(samplerDesc);
-    if (!m_MaterialSampler) {
-      throw std::runtime_error("Failed to create material sampler");
     }
 
     nvrhi::BindingLayoutDesc bindingLayoutDesc{};
@@ -297,6 +319,7 @@ namespace Iskra {
   void DDGIExperiment::RenderGeometry(const FrameContext& frame)
   {
     DDGIConstants ddgiConstants{};
+    ddgiConstants.lightColor = glm::vec4(m_LightColor, 1.0f);
     ddgiConstants.probeGridOrigin = m_DDGIResources.desc.center - m_DDGIResources.desc.halfSize;
     ddgiConstants.probeGridSpacing = 2.0f * m_DDGIResources.desc.halfSize / m_DDGIResources.desc.probeCount;
     ddgiConstants.probeGridSize = m_DDGIResources.desc.probeCount;
@@ -338,6 +361,7 @@ namespace Iskra {
   void DDGIExperiment::RenderProbeVisualization(const FrameContext& frame)
   {
     DDGIConstants ddgiConstants{};
+    ddgiConstants.lightColor = glm::vec4(m_LightColor, 1.0f);
     ddgiConstants.irradianceQuadSize = m_DDGIResources.desc.probeIrradianceResolution;
     ddgiConstants.probeGridOrigin = m_DDGIResources.desc.center - m_DDGIResources.desc.halfSize;
     ddgiConstants.probeGridSpacing = 2.0f * m_DDGIResources.desc.halfSize / m_DDGIResources.desc.probeCount;
@@ -365,14 +389,18 @@ namespace Iskra {
   void DDGIExperiment::UpdateProbeIrradiances(const FrameContext& frame)
   {
     DDGIConstants ddgiConstants{};
+    ddgiConstants.lightColor = glm::vec4(m_LightColor, 1.0f);
 
-    float randomAngle =
-      (2.0f * static_cast<float>(rand()) / RAND_MAX - 1.0f) * 0.001f;
+    // random angle over [0, 2*pi] in radians
+    float randomAngle = static_cast<float>(rand()) / static_cast<float>(RAND_MAX) * 2.0f * glm::pi<float>();
 
     ddgiConstants.toLight = m_ToLight;
     ddgiConstants.randomAngle = randomAngle;
     ddgiConstants.probeHysteresis = m_DDGIResources.desc.probeHysteresis;
     glm::vec3 probeSpacing = 2.0f * m_DDGIResources.desc.halfSize / m_DDGIResources.desc.probeCount;
+    ddgiConstants.probeGridOrigin = m_DDGIResources.desc.center - m_DDGIResources.desc.halfSize;
+    ddgiConstants.probeGridSpacing = probeSpacing;
+    ddgiConstants.probeGridSize = m_DDGIResources.desc.probeCount;
     ddgiConstants.probeMaxRayDistance = std::min(m_DDGIResources.desc.probeMaxRayDistance,
       1.5f * std::max({ probeSpacing.x, probeSpacing.y, probeSpacing.z }));
 
@@ -381,7 +409,7 @@ namespace Iskra {
 
     nvrhi::ComputeState state{};
     state.pipeline = m_DDGIResources.probeRayTracingPipeline.Get();
-    state.addBindingSet(m_DDGIResources.probeRayTracingBindingSet);
+    state.addBindingSet(m_DDGIResources.probeRayTracingBindingSet[m_DDGIResources.currentProbeAtlas]);
     state.addBindingSet(m_AssetRegistry.GetBindlessTextureDescriptorTable());
     frame.commandList->setComputeState(state);
     frame.commandList->dispatch(
@@ -428,21 +456,7 @@ namespace Iskra {
 
   void DDGIExperiment::InitializeDDGIResources(DDGIVolumeDesc desc)
   {
-    glm::vec3 volumeCenter = desc.center;
-    glm::vec3 volumeExtents = desc.halfSize;
-    std::vector<glm::vec3> probePositions;
-
-    for (int x = 0; x < desc.probeCount.x; ++x) {
-      for (int y = 0; y < desc.probeCount.y; ++y) {
-        for (int z = 0; z < desc.probeCount.z; ++z) {
-          glm::vec3 probePos = volumeCenter + glm::vec3(
-            (x + 0.5f) / desc.probeCount.x * 2.0f * volumeExtents.x - volumeExtents.x,
-            (y + 0.5f) / desc.probeCount.y * 2.0f * volumeExtents.y - volumeExtents.y,
-            (z + 0.5f) / desc.probeCount.z * 2.0f * volumeExtents.z - volumeExtents.z);
-          probePositions.push_back(probePos);
-        }
-      }
-    }
+    auto probePositions = BuildProbePositions(desc);
 
     nvrhi::BufferDesc probePositionsBufferDesc{};
     probePositionsBufferDesc.byteSize = probePositions.size() * sizeof(glm::vec3);
@@ -476,6 +490,7 @@ namespace Iskra {
 
     // Pack mesh positions and globally rebased indices for ray-query hit lookup.
     std::vector<glm::vec3> positions;
+    std::vector<glm::vec2> uvs;
     std::vector<uint32_t> indices;
     std::vector<uint32_t> meshIndexOffsets;
     for (const MeshData& mesh : m_Model.meshes) {
@@ -483,6 +498,7 @@ namespace Iskra {
       meshIndexOffsets.push_back(static_cast<uint32_t>(indices.size()));
       for (const Vertex& vertex : mesh.vertices) {
         positions.push_back(vertex.position);
+        uvs.push_back(vertex.uv);
       }
       for (uint32_t index : mesh.indices) {
         indices.push_back(vertexOffset + index);
@@ -491,8 +507,10 @@ namespace Iskra {
 
     // CollectDrawItems and CollectRayTracingInstances use the same node/mesh order.
     std::vector<uint32_t> instanceIndexOffsets;
+    std::vector<int32_t> instanceMaterialIndices;
     for (const MeshDrawItem& item : m_DrawItems) {
       instanceIndexOffsets.push_back(meshIndexOffsets.at(item.meshIndex));
+      instanceMaterialIndices.push_back(item.materialIndex);
     }
 
     auto createSceneBuffer = [&](size_t byteSize, uint32_t stride, const char* name) {
@@ -510,16 +528,22 @@ namespace Iskra {
       };
     m_DDGIResources.sceneVertexPositions = createSceneBuffer(
       positions.size() * sizeof(glm::vec3), sizeof(glm::vec3), "DDGI Scene Positions");
+    m_DDGIResources.sceneVertexUVs = createSceneBuffer(
+      uvs.size() * sizeof(glm::vec2), sizeof(glm::vec2), "DDGI Scene UVs");
     m_DDGIResources.sceneIndices = createSceneBuffer(
       indices.size() * sizeof(uint32_t), sizeof(uint32_t), "DDGI Scene Indices");
     m_DDGIResources.instanceIndexOffsets = createSceneBuffer(
       instanceIndexOffsets.size() * sizeof(uint32_t), sizeof(uint32_t), "DDGI Instance Index Offsets");
+    m_DDGIResources.instanceMaterialIndices = createSceneBuffer(
+      instanceMaterialIndices.size() * sizeof(int32_t), sizeof(int32_t), "DDGI Instance Material Indices");
 
     auto upload = m_Device->createCommandList();
     upload->open();
     upload->writeBuffer(m_DDGIResources.sceneVertexPositions, positions.data(), positions.size() * sizeof(glm::vec3));
+    upload->writeBuffer(m_DDGIResources.sceneVertexUVs, uvs.data(), uvs.size() * sizeof(glm::vec2));
     upload->writeBuffer(m_DDGIResources.sceneIndices, indices.data(), indices.size() * sizeof(uint32_t));
     upload->writeBuffer(m_DDGIResources.instanceIndexOffsets, instanceIndexOffsets.data(), instanceIndexOffsets.size() * sizeof(uint32_t));
+    upload->writeBuffer(m_DDGIResources.instanceMaterialIndices, instanceMaterialIndices.data(), instanceMaterialIndices.size() * sizeof(int32_t));
     upload->writeBuffer(m_DDGIResources.probePositions, probePositions.data(), probePositions.size() * sizeof(glm::vec3));
     upload->close();
     m_Device->executeCommandList(upload);
@@ -611,8 +635,14 @@ namespace Iskra {
        nvrhi::BindingLayoutItem::StructuredBuffer_SRV(2),
        nvrhi::BindingLayoutItem::StructuredBuffer_SRV(3),
        nvrhi::BindingLayoutItem::StructuredBuffer_SRV(4),
+       nvrhi::BindingLayoutItem::StructuredBuffer_SRV(5),
+       nvrhi::BindingLayoutItem::StructuredBuffer_SRV(6),
+       nvrhi::BindingLayoutItem::Sampler(0),
+       nvrhi::BindingLayoutItem::ConstantBuffer(1),
        nvrhi::BindingLayoutItem::VolatileConstantBuffer(0),
        nvrhi::BindingLayoutItem::Texture_UAV(0),
+       nvrhi::BindingLayoutItem::Texture_UAV(1),
+       nvrhi::BindingLayoutItem::Texture_UAV(2),
     };
 
     m_DDGIResources.probeRayTracingLayout = m_Device->createBindingLayout(probeRayTracingLayoutDesc);
@@ -638,21 +668,29 @@ namespace Iskra {
       }
     }
 
-    nvrhi::BindingSetDesc probeRayTracingBindingSet{};
-    probeRayTracingBindingSet.bindings = {
-      { nvrhi::BindingSetItem::RayTracingAccelStruct(0, m_RayTracingScene.GetTLAS()) },
-      { nvrhi::BindingSetItem::StructuredBuffer_SRV(1, m_DDGIResources.probePositions) },
-      { nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_DDGIResources.sceneVertexPositions) },
-      { nvrhi::BindingSetItem::StructuredBuffer_SRV(3, m_DDGIResources.sceneIndices) },
-      { nvrhi::BindingSetItem::StructuredBuffer_SRV(4, m_DDGIResources.instanceIndexOffsets) },
-      { nvrhi::BindingSetItem::ConstantBuffer(0, m_DDGIResources.ddgiConstants) },
-      { nvrhi::BindingSetItem::Texture_UAV(0, m_DDGIResources.rayProbeRadianceDistance) }
-    };
+    for (uint32_t atlas = 0; atlas < 2; ++atlas) {
+      nvrhi::BindingSetDesc probeRayTracingBindingSet{};
+      probeRayTracingBindingSet.bindings = {
+        { nvrhi::BindingSetItem::RayTracingAccelStruct(0, m_RayTracingScene.GetTLAS()) },
+        { nvrhi::BindingSetItem::StructuredBuffer_SRV(1, m_DDGIResources.probePositions) },
+        { nvrhi::BindingSetItem::StructuredBuffer_SRV(2, m_DDGIResources.sceneVertexPositions) },
+        { nvrhi::BindingSetItem::StructuredBuffer_SRV(3, m_DDGIResources.sceneIndices) },
+        { nvrhi::BindingSetItem::StructuredBuffer_SRV(4, m_DDGIResources.instanceIndexOffsets) },
+        { nvrhi::BindingSetItem::StructuredBuffer_SRV(5, m_DDGIResources.sceneVertexUVs) },
+        { nvrhi::BindingSetItem::StructuredBuffer_SRV(6, m_DDGIResources.instanceMaterialIndices) },
+        { nvrhi::BindingSetItem::Sampler(0, m_MaterialSampler) },
+        { nvrhi::BindingSetItem::ConstantBuffer(1, m_AssetRegistry.GetMaterialBuffer()) },
+        { nvrhi::BindingSetItem::ConstantBuffer(0, m_DDGIResources.ddgiConstants) },
+        { nvrhi::BindingSetItem::Texture_UAV(0, m_DDGIResources.rayProbeRadianceDistance) },
+        { nvrhi::BindingSetItem::Texture_UAV(1, m_DDGIResources.probeGridIrradiance[atlas]) },
+        { nvrhi::BindingSetItem::Texture_UAV(2, m_DDGIResources.probeGridDistance[atlas]) }
+      };
 
-    m_DDGIResources.probeRayTracingBindingSet = m_Device->createBindingSet(probeRayTracingBindingSet, m_DDGIResources.probeRayTracingLayout);
+      m_DDGIResources.probeRayTracingBindingSet[atlas] = m_Device->createBindingSet(probeRayTracingBindingSet, m_DDGIResources.probeRayTracingLayout);
 
-    if (!m_DDGIResources.probeRayTracingBindingSet) {
-      throw std::runtime_error("Failed to create probe irradiance update binding set");
+      if (!m_DDGIResources.probeRayTracingBindingSet[atlas]) {
+        throw std::runtime_error("Failed to create probe ray tracing binding set");
+      }
     }
     nvrhi::BindingLayoutDesc probeUpdateLayoutDesc{};
     probeUpdateLayoutDesc.visibility = nvrhi::ShaderType::Compute;
@@ -791,8 +829,41 @@ namespace Iskra {
     m_CameraController.OnInput(deltaTime, input);
   }
 
+  void DDGIExperiment::ResetProbeHistory(const FrameContext& frame)
+  {
+    for (uint32_t atlas = 0; atlas < 2; ++atlas) {
+      frame.commandList->clearTextureFloat(m_DDGIResources.probeGridIrradiance[atlas],
+        nvrhi::AllSubresources, nvrhi::Color(0.0f));
+      frame.commandList->clearTextureFloat(m_DDGIResources.probeGridDistance[atlas],
+        nvrhi::AllSubresources, nvrhi::Color(0.0f));
+    }
+    m_DDGIResources.currentProbeAtlas = 0;
+    m_ResetProbeHistory = false;
+  }
+
   void DDGIExperiment::OnRender(FrameContext& frame)
   {
+    if (m_ProbeResourcesDirty) {
+      // Rebuild only when counts or atlas resolutions change, after old GPU work completes.
+      if (!m_Device->waitForIdle())
+        throw std::runtime_error("Failed to wait for DDGI resource rebuild");
+      const auto desc = m_DDGIResources.desc;
+      const auto outputInfo = frame.framebuffer->getFramebufferInfo();
+      InitializeDDGI(desc, outputInfo);
+      CreateBindings();
+      CreatePipeline(outputInfo);
+      m_ProbeResourcesDirty = false;
+      m_ProbePositionsDirty = false;
+    }
+    if (m_ProbePositionsDirty) {
+      const auto positions = BuildProbePositions(m_DDGIResources.desc);
+      frame.commandList->writeBuffer(m_DDGIResources.probePositions,
+        positions.data(), positions.size() * sizeof(glm::vec3));
+      m_ProbePositionsDirty = false;
+    }
+    if (m_ResetProbeHistory)
+      ResetProbeHistory(frame);
+
     frame.commandList->clearDepthStencilTexture(
       frame.depthBuffer,
       nvrhi::AllSubresources,
@@ -803,8 +874,8 @@ namespace Iskra {
       nvrhi::AllSubresources,
       nvrhi::Color(0.15f, 0.12f, 0.20f, 1.0f));
 
-    RenderGeometry(frame);
     UpdateProbeIrradiances(frame);
+    RenderGeometry(frame);
     if (m_ShowProbes)
       RenderProbeVisualization(frame);
 
@@ -813,16 +884,58 @@ namespace Iskra {
   void DDGIExperiment::OnUiRender(FrameContext& frame)
   {
     ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSize(ImVec2(340.0f, 180.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(420.0f, 520.0f), ImGuiCond_FirstUseEver);
     ImGui::Begin("Lighting");
-    ImGui::SliderAngle("Sun azimuth", &m_SunAzimuth, -180.0f, 180.0f);
-    ImGui::SliderAngle("Sun elevation", &m_SunElevation, 1.0f, 89.0f);
+    m_ResetProbeHistory |= ImGui::SliderAngle("Sun azimuth", &m_SunAzimuth, -180.0f, 180.0f);
+    m_ResetProbeHistory |= ImGui::SliderAngle("Sun elevation", &m_SunElevation, 1.0f, 89.0f);
     ImGui::Text("Direction: %.2f, %.2f, %.2f", m_ToLight.x, m_ToLight.y, m_ToLight.z);
+    m_ResetProbeHistory |= ImGui::ColorEdit3("Light color", &m_LightColor.x);
     ImGui::Text("%.1f FPS", ImGui::GetIO().Framerate);
     // Checkbox to enable and disable the probe visualization
     ImGui::Checkbox("Show probes", &m_ShowProbes);
     ImGui::Checkbox("Use DDGI", &m_UseDDGI);
     ImGui::Checkbox("Show Indirect Lighting", &m_ShowIndirectLighting);
+    if (ImGui::CollapsingHeader("Probe volume", ImGuiTreeNodeFlags_DefaultOpen)) {
+      auto& desc = m_DDGIResources.desc;
+      bool moved = ImGui::DragFloat3("Volume center", &desc.center.x, 0.05f,
+        -10000.0f, 10000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp);
+      glm::vec3 spacing = 2.0f * desc.halfSize / desc.probeCount;
+      if (ImGui::DragFloat3("Probe spacing", &spacing.x, 0.01f,
+        0.05f, 100.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
+        desc.halfSize = 0.5f * spacing * desc.probeCount;
+        moved = true;
+      }
+      if (ImGui::DragFloat3("Volume half size", &desc.halfSize.x, 0.05f,
+        0.05f, 1000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp))
+        moved = true;
+      m_ProbePositionsDirty |= moved;
+      m_ResetProbeHistory |= moved;
+
+      int counts[3] = { int(desc.probeCount.x), int(desc.probeCount.y), int(desc.probeCount.z) };
+      bool rebuilt = false;
+      if (ImGui::DragInt3("Probe counts", counts, 0.1f, 1, 16, "%d", ImGuiSliderFlags_AlwaysClamp)) {
+        // Preserve spacing and center when changing the number of cells.
+        spacing = 2.0f * desc.halfSize / desc.probeCount;
+        desc.probeCount = glm::vec3(counts[0], counts[1], counts[2]);
+        desc.halfSize = 0.5f * spacing * desc.probeCount;
+        rebuilt = true;
+      }
+      rebuilt |= ImGui::SliderInt("Irradiance resolution", &desc.probeIrradianceResolution, 2, 16, "%d", ImGuiSliderFlags_AlwaysClamp);
+      rebuilt |= ImGui::SliderInt("Distance resolution", &desc.probeDistanceResolution, 2, 16, "%d", ImGuiSliderFlags_AlwaysClamp);
+      m_ProbeResourcesDirty |= rebuilt;
+      m_ResetProbeHistory |= rebuilt;
+      m_ResetProbeHistory |= ImGui::SliderFloat("History weight", &desc.probeHysteresis, 0.0f, 0.99f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+      float maxDistance = std::min(desc.probeMaxRayDistance, 1000.0f);
+      if (ImGui::DragFloat("Distance moment limit", &maxDistance, 0.1f,
+        0.05f, 1000.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp)) {
+        desc.probeMaxRayDistance = maxDistance;
+        m_ResetProbeHistory = true;
+      }
+      const auto count = desc.probeCount;
+      ImGui::Text("%d probes, %d rays per probe", int(count.x * count.y * count.z), desc.probeNumRays);
+      if (ImGui::Button("Reset accumulation"))
+        m_ResetProbeHistory = true;
+    }
     ImGui::End();
   }
 

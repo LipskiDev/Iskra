@@ -59,6 +59,17 @@ namespace Iskra {
 
     m_DescriptorTable = m_Device->createDescriptorTable(m_TexturesBindingLayout);
     m_Device->resizeDescriptorTable(m_DescriptorTable, k_MaxTextures);
+
+    std::vector<uint8_t> whiteFallback = {255, 255, 255, 255};
+    Texture whiteTexture;
+    whiteTexture.name = "white_fallback";
+    whiteTexture.width = 1;
+    whiteTexture.height = 1;
+    whiteTexture.data.resize(4);
+    memcpy(whiteTexture.data.data(), whiteFallback.data(), 4 * sizeof(uint8_t));
+    whiteTexture.gpuTextureIndex = static_cast<uint32_t>(m_Textures.size());
+    m_Textures.push_back(std::move(whiteTexture));
+    m_TexturesDirty = true;
   }
 
   void AssetRegistry::UpdateResourcesIfDirty()
