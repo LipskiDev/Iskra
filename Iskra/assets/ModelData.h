@@ -1,8 +1,6 @@
 #pragma once
 
-#include <assets/MeshData.h>
-#include <assets/MaterialData.h>
-#include <assets/TextureData.h>
+#include <assets/asset_handle.h>
 #include <glm/glm.hpp>
 #include <cstdint>
 #include <vector>
@@ -10,8 +8,8 @@
 
 namespace Iskra {
 struct MeshInstanceData {
-  uint32_t meshIndex;
-  int32_t materialIndex = -1;
+  MeshHandle mesh;
+  MaterialHandle material;
 };
 
 struct ModelNode {
@@ -23,9 +21,6 @@ struct ModelNode {
 };
 
 struct ModelData {
-  std::vector<MeshData> meshes;
   ModelNode root;
-  std::vector<Material> materials;
-  std::vector<Texture> textures;
 };
 }  // namespace Iskra

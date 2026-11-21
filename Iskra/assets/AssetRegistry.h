@@ -1,37 +1,59 @@
 #pragma once
 
+#include <assets/MaterialData.h>
+#include <assets/MeshData.h>
+#include <assets/ModelData.h>
+#include <assets/TextureData.h>
 #include <cstdint>
 #include <nvrhi/nvrhi.h>
-#include "ModelData.h"
+#include <assets/asset_handle.h>
+#include <graphics/GpuData.h>
+#include <cstddef>
 #include <filesystem>
 #include <assimp/mesh.h>
 #include <assimp/material.h>
 #include <assimp/texture.h>
 #include <assimp/scene.h>
+#include <span>
 #include <unordered_map>
+#include <vector>
 
 namespace Iskra {
-using AssetHandle = uint32_t;
 using TextureHandle = nvrhi::TextureHandle;
-using MaterialHandle = uint32_t;
 
 class AssetRegistry {
  public:
-  void Initialize(nvrhi::IDevice *device, nvrhi::ICommandList *commandList);
+  void Initialize(nvrhi::IDevice *device);
   void UpdateResourcesIfDirty();
   void Shutdown();
 
+  std::span<const Material> GetMaterials() const { return materials_; }
+
   // CPU Side: Load model data from disk and store it in the registry
-  ModelData LoadModel(const std::filesystem::path &path);
+  ModelHandle LoadModel(const std::filesystem::path &path);
   Texture LoadTexture(const std::filesystem::path &path);
   Material LoadMaterial(const std::filesystem::path &path);
 
+  MeshHandle AddMesh(MeshData mesh);
+  MaterialHandle AddMaterial(Material material);
+
+  const MeshData &GetMesh(MeshHandle handle) const;
+  const GpuMesh &GetGpuMesh(MeshHandle handle) const;
+  Material &GetMaterial(MaterialHandle handle);
+  const Material &GetMaterial(MaterialHandle handle) const;
+  const ModelData &GetModel(ModelHandle handle) const;
+  size_t GetMeshCount() const { return meshes_.size(); }
+
+  void UpdateMaterial(MaterialHandle handle, const Material &material);
+
   // GPU Side: Upload data to GPU and return handles for the resources
-  nvrhi::BufferHandle GetVertexBuffer();
-  nvrhi::BufferHandle GetIndexBuffer();
   nvrhi::BindingLayoutHandle GetBindlessTextureBindingLayout();
   nvrhi::DescriptorTableHandle GetBindlessTextureDescriptorTable();
-  nvrhi::BufferHandle GetMaterialBuffer() { return m_MaterialBuffer; }
+  nvrhi::BufferHandle GetMaterialBuffer() const { return materialBuffer_; }
+
+  bool materialsDirty_ = false;
+  bool meshesDirty_ = false;
+  bool m_TexturesDirty = false;
 
  private:
   MeshData ConvertMesh(const aiMesh &mesh);
@@ -40,33 +62,34 @@ class AssetRegistry {
   int32_t ResolveTexture(const aiString &reference, const aiScene &scene,
                          const std::filesystem::path &modelPath);
   Texture ConvertTexture(const aiTexture &texture);
-  ModelNode ConvertNode(const aiNode &node, const aiScene &scene);
+  ModelNode ConvertNode(const aiNode &node, const aiScene &scene,
+                        std::span<const MeshHandle> meshHandles,
+                        std::span<const MaterialHandle> materialHandles);
 
   void UploadMaterials();
   void UploadTextures();
-  void UploadModels();
+  void UploadMeshes();
 
  private:
   uint32_t k_MaxMaterials = 1024;
   uint32_t k_MaxTextures = 4 * 1024;
 
   // CPU Side
-  std::vector<Material> m_Materials;
-  std::vector<ModelData> m_Models;
+  struct MeshAsset {
+    MeshData data;
+    GpuMesh gpu;
+    bool gpuDirty = true;
+  };
+
+  std::vector<MeshAsset> meshes_;
+  std::vector<Material> materials_;
+  std::vector<ModelData> models_;
   std::vector<Texture> m_Textures;
   std::unordered_map<std::string, int32_t> m_TextureIndices;
-  bool m_MaterialsDirty = false;
-  bool m_ModelsDirty = false;
-  bool m_TexturesDirty = false;
 
   // GPU Side
-  nvrhi::BufferHandle m_VertexBuffer;
-  nvrhi::BufferHandle m_IndexBuffer;
-
   nvrhi::IDevice *m_Device;
-  nvrhi::ICommandList *m_CommandList;
-
-  nvrhi::BufferHandle m_MaterialBuffer;
+  nvrhi::BufferHandle materialBuffer_;
 
   nvrhi::SamplerHandle m_DefaultSampler;
 

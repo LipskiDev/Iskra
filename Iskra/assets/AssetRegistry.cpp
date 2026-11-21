@@ -1,4 +1,5 @@
 #include <assets/AssetRegistry.h>
+#include <graphics/MeshUploader.h>
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
@@ -44,10 +45,8 @@ glm::mat4 ConvertMatrix(const aiMatrix4x4 &assimpMatrix) {
 }  // namespace
 
 namespace Iskra {
-void AssetRegistry::Initialize(nvrhi::IDevice *device,
-                               nvrhi::ICommandList *commandList) {
+void AssetRegistry::Initialize(nvrhi::IDevice *device) {
   m_Device = device;
-  m_CommandList = commandList;
 
   nvrhi::BindlessLayoutDesc layoutDesc;
   layoutDesc.maxCapacity = k_MaxTextures;
@@ -72,9 +71,9 @@ void AssetRegistry::Initialize(nvrhi::IDevice *device,
 }
 
 void AssetRegistry::UpdateResourcesIfDirty() {
-  if (m_MaterialsDirty) {
+  if (materialsDirty_) {
     UploadMaterials();
-    m_MaterialsDirty = false;
+    materialsDirty_ = false;
   }
 
   if (m_TexturesDirty) {
@@ -82,15 +81,15 @@ void AssetRegistry::UpdateResourcesIfDirty() {
     m_TexturesDirty = false;
   }
 
-  if (m_ModelsDirty) {
-    UploadModels();
-    m_ModelsDirty = false;
+  if (meshesDirty_) {
+    UploadMeshes();
+    meshesDirty_ = false;
   }
 }
 
 void AssetRegistry::Shutdown() {}
 
-ModelData AssetRegistry::LoadModel(const std::filesystem::path &path) {
+ModelHandle AssetRegistry::LoadModel(const std::filesystem::path &path) {
   Assimp::Importer importer;
 
   const unsigned int flags = aiProcess_Triangulate |
@@ -106,23 +105,30 @@ ModelData AssetRegistry::LoadModel(const std::filesystem::path &path) {
   }
 
   ModelData model;
-  model.meshes.reserve(scene->mNumMeshes);
-
-  for (unsigned int i = 0; i < scene->mNumMeshes; ++i) {
-    MeshData mesh = ConvertMesh(*scene->mMeshes[i]);
-    model.meshes.push_back(mesh);
-  }
+  std::vector<MaterialHandle> materialHandles;
+  materialHandles.reserve(scene->mNumMaterials);
 
   for (uint32_t i = 0; i < scene->mNumMaterials; ++i) {
-    Material material = ConvertMaterial(*scene->mMaterials[i], *scene, path);
-    model.materials.push_back(material);
-    m_Materials.push_back(material);
-    m_MaterialsDirty = true;
+    materialHandles.push_back(
+        AddMaterial(ConvertMaterial(*scene->mMaterials[i], *scene, path)));
   }
 
-  model.root = ConvertNode(*scene->mRootNode, *scene);
+  std::vector<MeshHandle> meshHandles;
+  meshHandles.reserve(scene->mNumMeshes);
+  for (uint32_t i = 0; i < scene->mNumMeshes; ++i) {
+    meshHandles.push_back(AddMesh(ConvertMesh(*scene->mMeshes[i])));
+  }
 
-  return model;
+  model.root =
+      ConvertNode(*scene->mRootNode, *scene, meshHandles, materialHandles);
+
+  if (models_.size() >= ModelHandle::InvalidIndex) {
+    throw std::runtime_error("Model registry capacity exceeded");
+  }
+
+  const ModelHandle handle(static_cast<uint32_t>(models_.size()));
+  models_.push_back(std::move(model));
+  return handle;
 }
 
 Texture AssetRegistry::LoadTexture(const std::filesystem::path &path) {
@@ -148,12 +154,75 @@ Material AssetRegistry::LoadMaterial(const std::filesystem::path &path) {
   return Material();
 }
 
-nvrhi::BufferHandle AssetRegistry::GetVertexBuffer() {
-  return m_VertexBuffer;
+MeshHandle AssetRegistry::AddMesh(MeshData mesh) {
+  if (meshes_.size() >= MeshHandle::InvalidIndex) {
+    throw std::runtime_error("Mesh registry capacity exceeded");
+  }
+
+  const MeshHandle handle(static_cast<uint32_t>(meshes_.size()));
+  meshes_.push_back({.data = std::move(mesh)});
+  meshesDirty_ = true;
+  return handle;
 }
 
-nvrhi::BufferHandle AssetRegistry::GetIndexBuffer() {
-  return m_IndexBuffer;
+MaterialHandle AssetRegistry::AddMaterial(Material material) {
+  if (materials_.size() >= k_MaxMaterials) {
+    throw std::runtime_error("Material registry capacity exceeded");
+  }
+
+  const MaterialHandle handle(static_cast<uint32_t>(materials_.size()));
+  materials_.push_back(std::move(material));
+  materialsDirty_ = true;
+  return handle;
+}
+
+const MeshData &AssetRegistry::GetMesh(MeshHandle handle) const {
+  if (!handle) {
+    throw std::invalid_argument("Invalid mesh handle");
+  }
+  return meshes_.at(handle.GetIndex()).data;
+}
+
+const GpuMesh &AssetRegistry::GetGpuMesh(MeshHandle handle) const {
+  if (!handle) {
+    throw std::invalid_argument("Invalid mesh handle");
+  }
+
+  const MeshAsset &mesh = meshes_.at(handle.GetIndex());
+  if (mesh.gpuDirty || !mesh.gpu.vertexBuffer || !mesh.gpu.indexBuffer) {
+    throw std::runtime_error("Mesh has not been uploaded");
+  }
+  return mesh.gpu;
+}
+
+Material &AssetRegistry::GetMaterial(MaterialHandle handle) {
+  if (!handle) {
+    throw std::invalid_argument("Invalid material handle");
+  }
+  return materials_.at(handle.GetIndex());
+}
+
+const Material &AssetRegistry::GetMaterial(MaterialHandle handle) const {
+  if (!handle) {
+    throw std::invalid_argument("Invalid material handle");
+  }
+  return materials_.at(handle.GetIndex());
+}
+
+const ModelData &AssetRegistry::GetModel(ModelHandle handle) const {
+  if (!handle) {
+    throw std::invalid_argument("Invalid model handle");
+  }
+  return models_.at(handle.GetIndex());
+}
+
+void AssetRegistry::UpdateMaterial(MaterialHandle handle,
+                                   const Material &material) {
+  if (!handle) {
+    throw std::invalid_argument("Invalid material handle");
+  }
+  materials_.at(handle.GetIndex()) = material;
+  materialsDirty_ = true;
 }
 
 nvrhi::BindingLayoutHandle AssetRegistry::GetBindlessTextureBindingLayout() {
@@ -310,31 +379,35 @@ Texture AssetRegistry::ConvertTexture(const aiTexture &texture) {
   return tex;
 }
 
-ModelNode AssetRegistry::ConvertNode(const aiNode &node, const aiScene &scene) {
+ModelNode AssetRegistry::ConvertNode(
+    const aiNode &node, const aiScene &scene,
+    std::span<const MeshHandle> meshHandles,
+    std::span<const MaterialHandle> materialHandles) {
   ModelNode result;
   result.name = node.mName.C_Str();
   result.localTransform = ConvertMatrix(node.mTransformation);
   result.meshInstances.reserve(node.mNumMeshes);
 
   for (unsigned int i = 0; i < node.mNumMeshes; ++i) {
-    MeshInstanceData meshInstance;
-    meshInstance.meshIndex = node.mMeshes[i];
-    meshInstance.materialIndex = static_cast<int32_t>(
-        scene.mMeshes[meshInstance.meshIndex]->mMaterialIndex);
-    result.meshInstances.push_back(meshInstance);
+    const uint32_t meshIndex = node.mMeshes[i];
+    const uint32_t materialIndex = scene.mMeshes[meshIndex]->mMaterialIndex;
+    result.meshInstances.push_back(
+        {.mesh = meshHandles[meshIndex],
+         .material = materialHandles[materialIndex]});
   }
 
   result.children.reserve(node.mNumChildren);
   for (unsigned int i = 0; i < node.mNumChildren; ++i) {
-    result.children.push_back(ConvertNode(*node.mChildren[i], scene));
+    result.children.push_back(
+        ConvertNode(*node.mChildren[i], scene, meshHandles, materialHandles));
   }
 
   return result;
 }
 
 void AssetRegistry::UploadMaterials() {
-  m_MaterialBuffer = m_Device->createBuffer({
-      .byteSize = static_cast<uint32_t>(m_Materials.size() * sizeof(Material)),
+  materialBuffer_ = m_Device->createBuffer({
+      .byteSize = static_cast<uint32_t>(materials_.size() * sizeof(Material)),
       .structStride = sizeof(Material),
       .debugName = "Material Buffer",
       .isConstantBuffer = true,
@@ -344,8 +417,8 @@ void AssetRegistry::UploadMaterials() {
 
   auto upload = m_Device->createCommandList();
   upload->open();
-  upload->writeBuffer(m_MaterialBuffer, m_Materials.data(),
-                      m_Materials.size() * sizeof(Material));
+  upload->writeBuffer(materialBuffer_, materials_.data(),
+                      materials_.size() * sizeof(Material));
   upload->close();
 
   m_Device->executeCommandList(upload);
@@ -376,49 +449,19 @@ void AssetRegistry::UploadTextures() {
   }
 }
 
-void AssetRegistry::UploadModels() {
-  uint32_t totalVertexCount = 0;
-  uint32_t totalIndexCount = 0;
+void AssetRegistry::UploadMeshes() {
+  auto commandList = m_Device->createCommandList();
+  commandList->open();
 
-  std::vector<Vertex> allVertices;
-  std::vector<uint32_t> allIndices;
-
-  for (ModelData &model : m_Models) {
-    for (MeshData &mesh : model.meshes) {
-      totalVertexCount += static_cast<uint32_t>(mesh.vertices.size());
-      totalIndexCount += static_cast<uint32_t>(mesh.indices.size());
-
-      allVertices.insert(allVertices.end(), mesh.vertices.begin(),
-                         mesh.vertices.end());
-      allIndices.insert(allIndices.end(), mesh.indices.begin(),
-                        mesh.indices.end());
+  for (MeshAsset &mesh : meshes_) {
+    if (!mesh.gpuDirty) {
+      continue;
     }
+    mesh.gpu = UploadMesh(m_Device, commandList, mesh.data);
+    mesh.gpuDirty = false;
   }
 
-  m_VertexBuffer = m_Device->createBuffer({
-      .byteSize = totalVertexCount * sizeof(Vertex),
-      .structStride = sizeof(Vertex),
-      .debugName = "Vertex Buffer",
-      .initialState = nvrhi::ResourceStates::ShaderResource,
-      .keepInitialState = true,
-  });
-
-  m_IndexBuffer = m_Device->createBuffer({
-      .byteSize = totalIndexCount * sizeof(uint32_t),
-      .structStride = sizeof(uint32_t),
-      .debugName = "Index Buffer",
-      .initialState = nvrhi::ResourceStates::ShaderResource,
-      .keepInitialState = true,
-  });
-
-  auto upload = m_Device->createCommandList();
-  upload->open();
-  upload->writeBuffer(m_VertexBuffer, allVertices.data(),
-                      totalVertexCount * sizeof(Vertex));
-  upload->writeBuffer(m_IndexBuffer, allIndices.data(),
-                      totalIndexCount * sizeof(uint32_t));
-  upload->close();
-
-  m_Device->executeCommandList(upload);
+  commandList->close();
+  m_Device->executeCommandList(commandList);
 }
 }  // namespace Iskra
