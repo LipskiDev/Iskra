@@ -5,7 +5,7 @@ table.insert(shaderInputs, shaderCompiler)
 
 defines { 'ISKRA_SHADER_DIR="' .. shaderOutputDir .. '"' }
 
-local supportedStages = { vs = true, ps = true, gs = true, hs = true, ds = true, cs = true, ms = true, as = true }
+local supportedStages = { vs = true, ps = true, gs = true, hs = true, ds = true, cs = true, ms = true, as = true, lib = true }
 
 -- Read the same declaration as the compiler so MSBuild tracks the actual outputs.
 for _, source in ipairs(os.matchfiles(path.join(_MAIN_SCRIPT_DIR, "Iskra/**.hlsl"))) do

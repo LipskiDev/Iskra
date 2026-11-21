@@ -18,6 +18,7 @@ ENTRY_POINTS = {
     "cs": "CSMain",
     "ms": "MSMain",
     "as": "ASMain",
+    "lib": None,
 }
 
 
@@ -60,9 +61,11 @@ def main():
         with tempfile.TemporaryDirectory(prefix="shader-", dir=output_directory) as temporary:
             for stage in stages:
                 output = pathlib.Path(temporary) / f"{source.stem}.{stage}.dxil"
-                print(f"Compiling {source.name}: {ENTRY_POINTS[stage]} ({stage}_6_5)", flush=True)
+                entry_point = ENTRY_POINTS[stage]
+                entry_flags = ["-E", entry_point] if entry_point is not None else []
+                print(f"Compiling {source.name}: {entry_point or 'shader library'} ({stage}_6_5)", flush=True)
                 subprocess.run([
-                    compiler, "-T", f"{stage}_6_5", "-E", ENTRY_POINTS[stage],
+                    compiler, "-T", f"{stage}_6_5", *entry_flags,
                     "-I", str(source.parent), *flags, "-Fo", str(output), str(source),
                 ], check=True)
 
