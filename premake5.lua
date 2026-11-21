@@ -48,3 +48,21 @@ project "Iskra"
     defines { "ASSIMP_DLL" }
     defines { "GLFW_INCLUDE_NONE", "NOMINMAX", "NVRHI_D3D12_WITH_DXRCLUSTER=0" }
     links { "ImGui", "GLFW", "NVRHI", "d3d12", "dxgi", "dxguid", "user32", "gdi32", "shell32", "dwmapi" }
+
+group "Tests"
+project "IskraTests"
+    location "build/IskraTests"
+    kind "ConsoleApp"
+    language "C++"
+    cppdialect "C++20"
+    files {
+        "tests/ecs_tests.cpp",
+        "Iskra/scene/World.h",
+        "Iskra/scene/World.cpp",
+        "Iskra/scene/components/Entity.h",
+        "Iskra/scene/components/Entity.cpp",
+        "Iskra/scene/components/component_pool.h",
+        "Iskra/scene/components/component_query.h"
+    }
+    includedirs { "Iskra" }
+group ""
