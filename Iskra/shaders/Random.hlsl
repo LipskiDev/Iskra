@@ -59,7 +59,11 @@ float3 LambertianHemisphereDirection(float3 normal, uint seed)
   float y = sin(phi) * sin(theta);
   float z = cos(phi);
   
-  float3 tangent = normalize(abs(normal.x) > abs(normal.z) ? float3(-normal.y, normal.x, 0.0) : float3(0.0, -normal.z, normal.y));
+  float3 helper = abs(normal.y) < 0.999f
+  ? float3(0.0f, 1.0f, 0.0f)
+  : float3(1.0f, 0.0f, 0.0f);
+  
+  float3 tangent = normalize(cross(helper, normal));
   float3 bitangent = cross(normal, tangent);
   
   return normalize(x * tangent + y * bitangent + z * normal);

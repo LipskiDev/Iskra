@@ -17,3 +17,9 @@ Assimp v6.0.5 is included as a submodule and built automatically with CMake. Its
 Shaders compile automatically through `tools/CompileShader.py` with DXC (`dxc.exe` on PATH). Declare stages on the first line, for example `//@stages vs ps` or `//@stages ms ps`. Supported stages are `vs`, `ps`, `gs`, `hs`, `ds`, `cs`, `ms`, and `as`, with entry points `VSMain`, `PSMain`, etc., targeting shader model 6.5. Each stage produces `<filename>.<stage>.dxil` in the application's `shaders/` directory for each configuration. Debug embeds shader debug information and disables optimization; Release and Profile use `-O3`. Shared `.hlsli` changes also trigger compilation. Files without a stage declaration are not compiled. Regenerate projects after adding shaders or changing stage declarations so MSBuild tracks the correct outputs.
 
 The ImGui overlay uses GLFW for input and NVRHI for rendering. The Lighting panel controls sun azimuth and elevation; interacting with the UI captures camera input. Docking and additional OS windows are not enabled.
+
+## Validation before merging
+
+The formatting workflow checks first-party C++ with clang-format 19.1.7. Run
+`python tools/format_cpp.py` locally with that version, or append `--fix` to
+format all first-party C/C++ files.

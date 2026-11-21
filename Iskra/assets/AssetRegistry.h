@@ -11,68 +11,67 @@
 #include <unordered_map>
 
 namespace Iskra {
-  using AssetHandle = uint32_t;
-  using TextureHandle = nvrhi::TextureHandle;
-  using MaterialHandle = uint32_t;
+using AssetHandle = uint32_t;
+using TextureHandle = nvrhi::TextureHandle;
+using MaterialHandle = uint32_t;
 
-  class AssetRegistry {
-  public:
-    void Initialize(nvrhi::IDevice* device, nvrhi::ICommandList* commandList);
-    void UpdateResourcesIfDirty();
-    void Shutdown();
-    
-    // CPU Side: Load model data from disk and store it in the registry
-    ModelData LoadModel(const std::filesystem::path& path);
-    Texture LoadTexture(const std::filesystem::path& path);
-    Material LoadMaterial(const std::filesystem::path& path);
+class AssetRegistry {
+ public:
+  void Initialize(nvrhi::IDevice *device, nvrhi::ICommandList *commandList);
+  void UpdateResourcesIfDirty();
+  void Shutdown();
 
-    //GPU Side: Upload data to GPU and return handles for the resources
-    nvrhi::BufferHandle GetVertexBuffer();
-    nvrhi::BufferHandle GetIndexBuffer();
-    nvrhi::BindingLayoutHandle GetBindlessTextureBindingLayout();
-    nvrhi::DescriptorTableHandle GetBindlessTextureDescriptorTable();
-    nvrhi::BufferHandle GetMaterialBuffer() { return m_MaterialBuffer; }
+  // CPU Side: Load model data from disk and store it in the registry
+  ModelData LoadModel(const std::filesystem::path &path);
+  Texture LoadTexture(const std::filesystem::path &path);
+  Material LoadMaterial(const std::filesystem::path &path);
 
-  private:
-    MeshData ConvertMesh(const aiMesh& mesh);
-    Material ConvertMaterial(const aiMaterial& material, const aiScene& scene,
-      const std::filesystem::path& modelPath);
-    int32_t ResolveTexture(const aiString& reference, const aiScene& scene,
-      const std::filesystem::path& modelPath);
-    Texture ConvertTexture(const aiTexture& texture);
-    ModelNode ConvertNode(const aiNode& node, const aiScene& scene);
+  // GPU Side: Upload data to GPU and return handles for the resources
+  nvrhi::BufferHandle GetVertexBuffer();
+  nvrhi::BufferHandle GetIndexBuffer();
+  nvrhi::BindingLayoutHandle GetBindlessTextureBindingLayout();
+  nvrhi::DescriptorTableHandle GetBindlessTextureDescriptorTable();
+  nvrhi::BufferHandle GetMaterialBuffer() { return m_MaterialBuffer; }
 
-    void UploadMaterials();
-    void UploadTextures();
-    void UploadModels();
+ private:
+  MeshData ConvertMesh(const aiMesh &mesh);
+  Material ConvertMaterial(const aiMaterial &material, const aiScene &scene,
+                           const std::filesystem::path &modelPath);
+  int32_t ResolveTexture(const aiString &reference, const aiScene &scene,
+                         const std::filesystem::path &modelPath);
+  Texture ConvertTexture(const aiTexture &texture);
+  ModelNode ConvertNode(const aiNode &node, const aiScene &scene);
 
-  private:
-    uint32_t k_MaxMaterials = 1024;
-    uint32_t k_MaxTextures = 4 * 1024;
+  void UploadMaterials();
+  void UploadTextures();
+  void UploadModels();
 
-    // CPU Side
-    std::vector<Material> m_Materials;
-    std::vector<ModelData> m_Models;
-    std::vector<Texture> m_Textures;
-    std::unordered_map<std::string, int32_t> m_TextureIndices;
-    bool m_MaterialsDirty = false;
-    bool m_ModelsDirty = false;
-    bool m_TexturesDirty = false;
+ private:
+  uint32_t k_MaxMaterials = 1024;
+  uint32_t k_MaxTextures = 4 * 1024;
 
-    // GPU Side
-    nvrhi::BufferHandle m_VertexBuffer;
-    nvrhi::BufferHandle m_IndexBuffer;
+  // CPU Side
+  std::vector<Material> m_Materials;
+  std::vector<ModelData> m_Models;
+  std::vector<Texture> m_Textures;
+  std::unordered_map<std::string, int32_t> m_TextureIndices;
+  bool m_MaterialsDirty = false;
+  bool m_ModelsDirty = false;
+  bool m_TexturesDirty = false;
 
-    nvrhi::IDevice* m_Device;
-    nvrhi::ICommandList* m_CommandList;
+  // GPU Side
+  nvrhi::BufferHandle m_VertexBuffer;
+  nvrhi::BufferHandle m_IndexBuffer;
 
-    nvrhi::BufferHandle m_MaterialBuffer;
+  nvrhi::IDevice *m_Device;
+  nvrhi::ICommandList *m_CommandList;
 
-    nvrhi::SamplerHandle m_DefaultSampler;
+  nvrhi::BufferHandle m_MaterialBuffer;
 
-    //Bindless
-    nvrhi::BindingLayoutHandle m_TexturesBindingLayout;
-    nvrhi::DescriptorTableHandle m_DescriptorTable;
+  nvrhi::SamplerHandle m_DefaultSampler;
 
-  };
-}
+  // Bindless
+  nvrhi::BindingLayoutHandle m_TexturesBindingLayout;
+  nvrhi::DescriptorTableHandle m_DescriptorTable;
+};
+}  // namespace Iskra

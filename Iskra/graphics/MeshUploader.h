@@ -6,9 +6,14 @@
 #include <assets/TextureData.h>
 
 namespace Iskra {
-  GpuMesh UploadMesh(nvrhi::IDevice* device, nvrhi::ICommandList* commandList, const MeshData& meshData);
+GpuMesh UploadMesh(nvrhi::IDevice *device, nvrhi::ICommandList *commandList,
+                   const MeshData &meshData);
 
-  GpuMaterial UploadMaterial(nvrhi::IDevice* device, nvrhi::ICommandList* commandList, const Material& materialData);
+GpuMaterial UploadMaterial(nvrhi::IDevice *device,
+                           nvrhi::ICommandList *commandList,
+                           const Material &materialData);
 
-  GpuTexture UploadTexture(nvrhi::IDevice* device, nvrhi::ICommandList* commandList, const Texture& textureData);
-}
+GpuTexture UploadTexture(nvrhi::IDevice *device,
+                         nvrhi::ICommandList *commandList,
+                         const Texture &textureData);
+}  // namespace Iskra

@@ -1,7 +1,5 @@
 #pragma once
 
 namespace Iskra {
-  struct Scene {
-
-  };
-}
+struct Scene {};
+}  // namespace Iskra
