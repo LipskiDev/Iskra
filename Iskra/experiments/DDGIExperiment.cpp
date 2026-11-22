@@ -1,7 +1,7 @@
 #include <experiments/DDGIExperiment.h>
 
-#include <graphics/MeshUploader.h>
 #include <graphics/ModelTraversal.h>
+#include <scene/components/Components.h>
 #include <imgui.h>
 
 #include <algorithm>
@@ -68,9 +68,8 @@ void DDGIExperiment::OnInit(nvrhi::IDevice *device,
   m_Camera.SetOrientation(glm::vec3(0.0, 0.0f, -1.0f));
   m_CameraController.SetCamera(m_Camera);
 
-  m_AssetRegistry.Initialize(m_Device, nullptr);
+  m_AssetRegistry.Initialize(m_Device);
   LoadScene();
-  m_AssetRegistry.UpdateResourcesIfDirty();
 
   nvrhi::SamplerDesc samplerDesc;
   samplerDesc.setAllFilters(true);
@@ -90,20 +89,19 @@ void DDGIExperiment::OnInit(nvrhi::IDevice *device,
 }
 
 void DDGIExperiment::LoadScene() {
-  m_Model = m_AssetRegistry.LoadModel("assets/models/sponza/Sponza.gltf");
+  const ModelHandle model =
+      m_AssetRegistry.LoadModel("assets/models/sponza/Sponza.gltf");
 
-  m_DrawItems.clear();
-  CollectDrawItems(m_Model.root, glm::mat4(1.0f), m_DrawItems);
+  m_AssetRegistry.UpdateResourcesIfDirty();
 
-  auto upload = m_Device->createCommandList();
-  upload->open();
+  Entity sponza = m_World.CreateEntity("Sponza");
+  TransformComponent &transform = sponza.AddComponent<TransformComponent>();
+  transform.localTransform = glm::mat4(1.0f);
+  transform.worldTransform = glm::mat4(1.0f);
+  transform.dirty = false;
+  sponza.AddComponent<ModelComponent>(ModelComponent{.model = model});
 
-  for (const MeshData &mesh : m_Model.meshes) {
-    m_GpuMeshes.push_back(UploadMesh(m_Device, upload.Get(), mesh));
-  }
-
-  upload->close();
-  m_Device->executeCommandList(upload);
+  ExtractRenderInstances();
 
   if (!m_Device->waitForIdle()) {
     throw std::runtime_error("Failed to wait for GPU");
@@ -112,13 +110,39 @@ void DDGIExperiment::LoadScene() {
   auto build = m_Device->createCommandList();
   build->open();
 
-  m_RayTracingScene.Build(m_Device, build.Get(), m_Model, m_GpuMeshes);
+  m_RayTracingScene.Build(m_Device, build.Get(), m_RenderInstances,
+                          m_AssetRegistry);
   build->close();
   m_Device->executeCommandList(build);
 
   if (!m_Device->waitForIdle()) {
     throw std::runtime_error("Failed to wait for GPU");
   }
+}
+
+void DDGIExperiment::ExtractRenderInstances() {
+  m_RenderInstances.clear();
+
+  const World &world = m_World;
+  world.Query<TransformComponent, MeshComponent>().Each(
+      [&](Entity entity, const TransformComponent &transform,
+          const MeshComponent &mesh) {
+        m_RenderInstances.push_back({
+            .entity = entity.GetId(),
+            .mesh = mesh.mesh,
+            .material = mesh.material,
+            .worldTransform = transform.worldTransform,
+            .visibilityMask = mesh.visibilityMask,
+        });
+      });
+
+  world.Query<TransformComponent, ModelComponent>().Each(
+      [&](Entity entity, const TransformComponent &transform,
+          const ModelComponent &model) {
+        CollectRenderInstances(m_AssetRegistry.GetModel(model.model).root,
+                               transform.worldTransform, entity.GetId(),
+                               model.visibilityMask, m_RenderInstances);
+      });
 }
 
 void DDGIExperiment::CreateBindings() {
@@ -325,15 +349,16 @@ void DDGIExperiment::RenderGeometry(const FrameContext &frame) {
   frame.commandList->writeBuffer(m_DDGIResources.ddgiConstants, &ddgiConstants,
                                  sizeof(ddgiConstants));
 
-  for (const MeshDrawItem &item : m_DrawItems) {
+  for (const RenderInstance &instance : m_RenderInstances) {
     ConstantBufferData constants{};
-    constants.model = item.worldTransform;
+    constants.model = instance.worldTransform;
     constants.view = m_Camera.GetViewMatrix();
     constants.projection = m_Camera.GetProjectionMatrix();
-    constants.normalMatrix = glm::transpose(glm::inverse(item.worldTransform));
+    constants.normalMatrix =
+        glm::transpose(glm::inverse(instance.worldTransform));
     constants.toLight = m_ToLight;
     constants.cameraPosition = m_Camera.GetPosition();
-    constants.materialIndex = item.materialIndex;
+    constants.materialIndex = instance.material.GetIndex();
 
     frame.commandList->writeBuffer(m_ConstantBuffer, &constants,
                                    sizeof(constants));
@@ -356,8 +381,8 @@ void DDGIExperiment::RenderGeometry(const FrameContext &frame) {
     state.viewport.addViewportAndScissorRect(
         frame.framebuffer->getFramebufferInfo().getViewport());
 
-    m_MeshRenderer.Draw(frame.commandList, m_GpuMeshes.at(item.meshIndex),
-                        state);
+    m_MeshRenderer.Draw(frame.commandList,
+                        m_AssetRegistry.GetGpuMesh(instance.mesh), state);
   }
 }
 
@@ -524,7 +549,9 @@ void DDGIExperiment::InitializeDDGIResources(DDGIVolumeDesc desc) {
   std::vector<glm::vec2> uvs;
   std::vector<uint32_t> indices;
   std::vector<uint32_t> meshIndexOffsets;
-  for (const MeshData &mesh : m_Model.meshes) {
+  meshIndexOffsets.reserve(m_AssetRegistry.GetMeshCount());
+  for (uint32_t i = 0; i < m_AssetRegistry.GetMeshCount(); ++i) {
+    const MeshData &mesh = m_AssetRegistry.GetMesh(MeshHandle(i));
     const uint32_t vertexOffset = static_cast<uint32_t>(positions.size());
     meshIndexOffsets.push_back(static_cast<uint32_t>(indices.size()));
     for (const Vertex &vertex : mesh.vertices) {
@@ -536,13 +563,14 @@ void DDGIExperiment::InitializeDDGIResources(DDGIVolumeDesc desc) {
     }
   }
 
-  // CollectDrawItems and CollectRayTracingInstances use the same node/mesh
-  // order.
+  // These arrays use the same order as the TLAS instance IDs.
   std::vector<uint32_t> instanceIndexOffsets;
   std::vector<int32_t> instanceMaterialIndices;
-  for (const MeshDrawItem &item : m_DrawItems) {
-    instanceIndexOffsets.push_back(meshIndexOffsets.at(item.meshIndex));
-    instanceMaterialIndices.push_back(item.materialIndex);
+  for (const RenderInstance &instance : m_RenderInstances) {
+    instanceIndexOffsets.push_back(
+        meshIndexOffsets.at(instance.mesh.GetIndex()));
+    instanceMaterialIndices.push_back(
+        static_cast<int32_t>(instance.material.GetIndex()));
   }
 
   auto createSceneBuffer = [&](size_t byteSize, uint32_t stride,

@@ -5,26 +5,42 @@
 namespace Iskra {
 void RayTracingScene::Build(nvrhi::IDevice *device,
                             nvrhi::ICommandList *commandList,
-                            const ModelData &model,
-                            const std::vector<GpuMesh> &gpuMeshes,
-                            const glm::mat4 &placement) {
+                            std::span<const RenderInstance> renderInstances,
+                            const AssetRegistry &assets) {
   if (!device->queryFeatureSupport(nvrhi::Feature::RayQuery)) {
     throw std::runtime_error("Inline ray tracing is unsupported");
   }
 
   m_BLASes.clear();
-  m_BLASes.reserve(gpuMeshes.size());
+  m_BLASes.reserve(assets.GetMeshCount());
 
-  for (const GpuMesh &mesh : gpuMeshes) {
-    m_BLASes.push_back(BuildBLAS(device, commandList, mesh));
+  for (uint32_t i = 0; i < assets.GetMeshCount(); ++i) {
+    m_BLASes.push_back(
+        BuildBLAS(device, commandList, assets.GetGpuMesh(MeshHandle(i))));
+  }
+
+  if (renderInstances.empty()) {
+    throw std::runtime_error("No ray-tracing instances");
   }
 
   std::vector<nvrhi::rt::InstanceDesc> instances;
+  instances.reserve(renderInstances.size());
+  for (uint32_t instanceIndex = 0; instanceIndex < renderInstances.size();
+       ++instanceIndex) {
+    const RenderInstance &source = renderInstances[instanceIndex];
+    nvrhi::rt::InstanceDesc instance{};
 
-  CollectRayTracingInstances(model.root, placement, m_BLASes, instances);
+    for (int row = 0; row < 3; ++row) {
+      for (int column = 0; column < 4; ++column) {
+        instance.transform[row * 4 + column] =
+            source.worldTransform[column][row];
+      }
+    }
 
-  if (instances.empty()) {
-    throw std::runtime_error("No ray-tracing instances");
+    instance.bottomLevelAS = m_BLASes.at(source.mesh.GetIndex()).Get();
+    instance.instanceMask = static_cast<uint8_t>(source.visibilityMask);
+    instance.instanceID = instanceIndex;
+    instances.push_back(instance);
   }
 
   nvrhi::rt::AccelStructDesc desc{};
@@ -79,30 +95,4 @@ nvrhi::rt::AccelStructHandle RayTracingScene::BuildBLAS(
   return blas;
 }
 
-void RayTracingScene::CollectRayTracingInstances(
-    const ModelNode &node, const glm::mat4 &parentTransform,
-    const std::vector<nvrhi::rt::AccelStructHandle> &blases,
-    std::vector<nvrhi::rt::InstanceDesc> &instances) {
-  const glm::mat4 world = parentTransform * node.localTransform;
-
-  for (const MeshInstanceData &mesh : node.meshInstances) {
-    nvrhi::rt::InstanceDesc instance{};
-
-    for (int row = 0; row < 3; ++row) {
-      for (int column = 0; column < 4; ++column) {
-        instance.transform[row * 4 + column] = world[column][row];
-      }
-    }
-
-    instance.bottomLevelAS = blases.at(mesh.meshIndex).Get();
-    instance.instanceMask = 0xff;
-    instance.instanceID = static_cast<uint32_t>(instances.size());
-
-    instances.push_back(instance);
-  }
-
-  for (const ModelNode &child : node.children) {
-    CollectRayTracingInstances(child, world, blases, instances);
-  }
-}
 }  // namespace Iskra

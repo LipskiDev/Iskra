@@ -1,15 +1,17 @@
 #pragma once
 
 #include <nvrhi/nvrhi.h>
-#include <assets/ModelData.h>
-#include <graphics/GpuData.h>
+#include <assets/AssetRegistry.h>
+#include <graphics/render_instance.h>
+
+#include <span>
 
 namespace Iskra {
 class RayTracingScene {
  public:
   void Build(nvrhi::IDevice *device, nvrhi::ICommandList *commandList,
-             const ModelData &model, const std::vector<GpuMesh> &gpuMeshes,
-             const glm::mat4 &placemnt = glm::mat4(1.0));
+             std::span<const RenderInstance> instances,
+             const AssetRegistry &assets);
 
   nvrhi::rt::IAccelStruct *GetTLAS() const { return m_TLAS.Get(); }
 
@@ -20,10 +22,5 @@ class RayTracingScene {
   nvrhi::rt::AccelStructHandle BuildBLAS(nvrhi::IDevice *device,
                                          nvrhi::ICommandList *commandList,
                                          const GpuMesh &mesh);
-
-  void CollectRayTracingInstances(
-      const ModelNode &node, const glm::mat4 &parentTransform,
-      const std::vector<nvrhi::rt::AccelStructHandle> &blases,
-      std::vector<nvrhi::rt::InstanceDesc> &instances);
 };
 }  // namespace Iskra

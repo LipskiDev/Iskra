@@ -3,11 +3,11 @@
 #include <experiments/Experiment.h>
 #include <scene/Camera.h>
 #include <scene/FlyingCameraController.h>
-#include <assets/ModelData.h>
+#include <scene/World.h>
 #include <graphics/GpuData.h>
 #include <graphics/MeshRenderer.h>
-#include <graphics/MeshDrawItem.h>
 #include <graphics/RayTracingScene.h>
+#include <graphics/render_instance.h>
 #include <assets/AssetRegistry.h>
 
 namespace Iskra {
@@ -100,6 +100,7 @@ class DDGIExperiment : public Experiment {
 
  private:
   void LoadScene();
+  void ExtractRenderInstances();
   void CreateBindings();
   void CreatePipeline(const nvrhi::FramebufferInfo &outputInfo);
   void RenderGeometry(const FrameContext &frame);
@@ -122,9 +123,8 @@ class DDGIExperiment : public Experiment {
   FlyingCameraController m_CameraController;
   AssetRegistry m_AssetRegistry;
 
-  ModelData m_Model;
-  std::vector<GpuMesh> m_GpuMeshes;
-  std::vector<MeshDrawItem> m_DrawItems;
+  World m_World;
+  std::vector<RenderInstance> m_RenderInstances;
 
   nvrhi::GraphicsPipelineHandle m_Pipeline;
   nvrhi::BindingLayoutHandle m_BindingLayout;
