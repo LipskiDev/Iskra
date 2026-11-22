@@ -23,6 +23,22 @@ struct Sphere
 {
     float3 center;
     float radius;
+    uint materialIndex;
+    uint3 padding;
+};
+
+struct RTVertex
+{
+    float3 position;
+    float3 normal;
+};
+
+struct TriangleInstanceData
+{
+    uint vertexOffset;
+    uint indexOffset;
+    uint materialIndex;
+    uint padding;
 };
 
 static const uint MATERIAL_LAMBERTIAN = 0;
@@ -32,14 +48,15 @@ static const uint MATERIAL_EMISSIVE = 3;
 
 struct Material
 {
-    float3 albedo;
-    uint type;
-  
+    float3 baseColor;
+    float metallic;
+
     float3 emission;
     float roughness;
-  
+
+    float transmission;
     float ior;
-    float3 padding;
+    float2 padding;
 };
 
 struct SphereAttributes
@@ -58,7 +75,10 @@ struct UniformBuffer
 };
 
 StructuredBuffer<Sphere> spheres : register(t1);
-StructuredBuffer<Material> materials : register(t2);
+StructuredBuffer<RTVertex> vertices : register(t2);
+StructuredBuffer<uint> indices : register(t3);
+StructuredBuffer<Material> materials : register(t4);
+StructuredBuffer<TriangleInstanceData> triangleInstances : register(t5);
 ConstantBuffer<UniformBuffer> uniformBuffer : register(b0);
 
 float3 LinearToSRGB(float3 linearColor)
@@ -81,7 +101,7 @@ void RayGen()
     uint seed = xxhash32(uint3(uint2(launchIndex.xy), uniformBuffer.frame));
   
     int sampleCount = 1;
-    int bounceCount = 4;
+    int bounceCount = 8;
   
     float4 accumulatedColor = float4(0.0, 0.0, 0.0, 0.0);
   
@@ -132,7 +152,7 @@ void RayGen()
             }
             
             ray.Origin = payload.nextOrigin;
-            ray.Direction = payload.nextDirection   ;
+            ray.Direction = payload.nextDirection;
         }
         accumulatedColor += float4(payload.radiance, 1.0);
     }
@@ -144,7 +164,8 @@ void RayGen()
     g_accumulationTexture[launchIndex] = newColor;
   
     float4 finalColor = newColor;
-    g_output[launchIndex] = float4(LinearToSRGB(finalColor.rgb), finalColor.a);
+    float3 mappedColor = finalColor.rgb / (1.0f + finalColor.rgb);
+    g_output[launchIndex] = float4(LinearToSRGB(mappedColor), finalColor.a);
 }
 
 [shader("miss")]
@@ -168,72 +189,119 @@ float Schlick(float cosTheta, float ior)
     return r0 + (1.0 - r0) * pow(1.0 - cosTheta, 5.0);
 }
 
-[shader("closesthit")]
-void SphereClosestHit(inout RayPayload payload, in SphereAttributes attributes)
+void ShadeSurface(inout RayPayload payload, Material material, float3 position,
+                  float3 outwardNormal, uint randomKey)
 {
-    Material mat = materials[PrimitiveIndex()];
-  
-    float3 position = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
-    
-    float3 normal = normalize(mul(attributes.normal, (float3x3) ObjectToWorld3x4()));
-    
+    float3 normal = normalize(outwardNormal);
     bool frontFace = dot(WorldRayDirection(), normal) < 0.0;
-    
     normal = frontFace ? normal : -normal;
-    
     payload.bounceCount += 1;
-    
-    switch (mat.type)
+    float emissionStrength = max(material.emission.r, max(material.emission.g, material.emission.b));
+
+    if (emissionStrength > 0.0f)
     {
-        case MATERIAL_LAMBERTIAN:
+        payload.radiance += payload.throughput * material.emission;
+        payload.terminated = true;
+        return;
+    }
+
+    float transmissionWeight = saturate(material.transmission);
+    float metallicWeight = saturate(material.metallic) * (1.0 - transmissionWeight);
+
+    float diffuseWeight = (1.0 - saturate(material.metallic)) * (1.0 - transmissionWeight);
+
+    payload.throughput *= material.baseColor;
+
+    float totalWeight = diffuseWeight + metallicWeight + transmissionWeight;
+
+    if (totalWeight <= 0.0f)
+    {
+        payload.terminated = true;
+        return;
+    }
+
+    diffuseWeight /= totalWeight;
+    metallicWeight /= totalWeight;
+    transmissionWeight /= totalWeight;
+
+    float choice = Random(payload.randomState);
+
+    if (choice < diffuseWeight)
+    {
+        payload.nextDirection = LambertianHemisphereDirection(normal, payload.randomState);
+
+    }
+    else if (choice < diffuseWeight + metallicWeight)
+    {
+        float3 reflected =
+        reflect(normalize(WorldRayDirection()), normal);
+
+        float3 diffuseDirection =
+        LambertianHemisphereDirection(normal, payload.randomState);
+
+        payload.nextDirection = normalize(
+        lerp(reflected, diffuseDirection, material.roughness));
+    }
+    else
+    {
+        float3 direction = normalize(WorldRayDirection());
+        float eta = frontFace ? rcp(material.ior) : material.ior;
+
+        float cosTheta = min(dot(-direction, normal), 1.0f);
+        float sinTheta =
+        sqrt(max(0.0f, 1.0f - cosTheta * cosTheta));
+
+        bool cannotRefract = eta * sinTheta > 1.0f;
+        float reflectProbability = Schlick(cosTheta, material.ior);
+
+        if (cannotRefract ||
+        Random(payload.randomState) < reflectProbability)
         {
-            payload.throughput *= mat.albedo;
-            payload.nextDirection = LambertianHemisphereDirection(normal, payload.randomState);
-            break;
+            payload.nextDirection = reflect(direction, normal);
         }
-        case MATERIAL_METAL:
+        else
         {
-            float3 reflected = reflect(normalize(WorldRayDirection()), normal);
-            payload.throughput *= mat.albedo;
-            payload.nextDirection = reflected;
-            break;
-        }
-        case MATERIAL_DIELECTRIC:
-        {
-            float3 direction = normalize(WorldRayDirection());
-            float eta = frontFace ? rcp(mat.ior) : mat.ior;
-
-            float cosTheta = min(dot(-direction, normal), 1.0f);
-            float sinTheta = sqrt(max(0.0f, 1.0f - cosTheta * cosTheta));
-
-            bool cannotRefract = eta * sinTheta > 1.0f;
-            float reflectProbability = Schlick(cosTheta, eta);
-
-            if (cannotRefract || Random(payload.randomState) < reflectProbability)
-            {
-                payload.nextDirection = reflect(direction, normal);
-            }
-            else
-            {
-                payload.nextDirection = refract(direction, normal, eta);
-            }
-
-            payload.throughput *= mat.albedo;
-            break;
-        }
-        case MATERIAL_EMISSIVE:
-        {
-            payload.radiance += payload.throughput * mat.emission;
-            payload.terminated = true;
-            break;
+            payload.nextDirection =
+            refract(direction, normal, eta);
         }
     }
     
     float offsetSide = dot(payload.nextDirection, normal) >= 0.0f ? 1.0f : -1.0f;
 
     payload.nextOrigin = position + normal * (offsetSide * 0.001f);
-    payload.randomState = xxhash32(uint3(payload.randomState, payload.bounceCount, PrimitiveIndex()));
+    payload.randomState = xxhash32(uint3(payload.randomState, payload.bounceCount, randomKey));
+}
 
+[shader("closesthit")]
+void SphereClosestHit(inout RayPayload payload, in SphereAttributes attributes)
+{
+    Sphere sphere = spheres[PrimitiveIndex()];
+    float3 position = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+    float3 normal = normalize(mul(attributes.normal, (float3x3) ObjectToWorld3x4()));
+    ShadeSurface(payload, materials[sphere.materialIndex], position, normal,
+                 PrimitiveIndex());
+}
+
+[shader("closesthit")]
+void TriangleClosestHit(inout RayPayload payload,
+                        in BuiltInTriangleIntersectionAttributes attributes)
+{
+    TriangleInstanceData instance = triangleInstances[InstanceID()];
+    uint triangleIndex = instance.indexOffset + PrimitiveIndex() * 3;
+    uint i0 = instance.vertexOffset + indices[triangleIndex];
+    uint i1 = instance.vertexOffset + indices[triangleIndex + 1];
+    uint i2 = instance.vertexOffset + indices[triangleIndex + 2];
+
+    float3 barycentrics = float3(1.0f - attributes.barycentrics.x - attributes.barycentrics.y,
+                                 attributes.barycentrics.x, attributes.barycentrics.y);
+    float3 objectNormal = vertices[i0].normal * barycentrics.x
+                        + vertices[i1].normal * barycentrics.y
+                        + vertices[i2].normal * barycentrics.z;
+    float3 worldNormal = normalize(mul(objectNormal, (float3x3) ObjectToWorld3x4()));
+    float3 position = WorldRayOrigin() + WorldRayDirection() * RayTCurrent();
+
+    ShadeSurface(payload, materials[instance.materialIndex], position, worldNormal,
+                 PrimitiveIndex() ^ (InstanceID() * 0x9e3779b9u));
 }
 
 [shader("intersection")]
